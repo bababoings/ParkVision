@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subir Video - CETYS Parking</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <div class="app-header">
+            <h1>📤 Subir Video de Estacionamiento</h1>
+            <p class="subtitle">Arrastra o selecciona un archivo de video para comenzar el análisis</p>
+        </div>
+
+        <div class="nav-bar">
+            <a href="/" class="nav-btn">🏠 Dashboard</a>
+            <a href="/upload" class="nav-btn active">📤 Subir Video</a>
+            <a href="/space_picker" class="nav-btn">📐 Delimitar Espacios</a>
+        </div>
+
+        <div id="alert-container"></div>
+
+        <div class="glass-card">
+            <div class="card-body">
+                <div class="upload-zone" id="upload-zone">
+                    <div class="upload-icon">🎬</div>
+                    <p><strong>Arrastra tu video aquí</strong></p>
+                    <p>o haz clic para seleccionar un archivo</p>
+                    <p class="upload-hint">Formatos aceptados: MP4, AVI, MOV &bull; Tamaño máximo: 500 MB</p>
+                    <input type="file" id="file-input" accept=".mp4,.avi,.mov,.mkv" style="display: none;">
+                    <div class="progress-bar-container" id="progress-container">
+                        <div class="progress-bar-fill" id="progress-bar"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="current-video" class="glass-card" style="margin-top: 1.5rem; display: none;">
+            <div class="card-body" style="text-align: center;">
+                <p style="color: var(--accent-green); font-weight: 600;">✅ Video cargado correctamente</p>
+                <p id="video-name" style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;"></p>
+                <div style="margin-top: 1rem; display: flex; gap: 0.75rem; justify-content: center;">
+                    <a href="/space_picker" class="btn-primary-custom">📐 Delimitar Espacios</a>
+                    <a href="/" class="btn-success-custom">▶ Ir al Dashboard</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="app-footer">
+            <p>© 2026 CETYS Universidad — Sistema de Detección de Estacionamiento</p>
+        </div>
+    </div>
+
+    <script>
+        const uploadZone = document.getElementById('upload-zone');
+        const fileInput = document.getElementById('file-input');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const alertContainer = document.getElementById('alert-container');
+        const currentVideoCard = document.getElementById('current-video');
+        const videoNameEl = document.getElementById('video-name');
+
+        const ALLOWED_EXTENSIONS = ['.mp4', '.avi', '.mov', '.mkv'];
+        const MAX_SIZE_MB = 500;
+
+        uploadZone.addEventListener('click', () => fileInput.click());
+
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) handleFile(files[0]);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleFile(e.target.files[0]);
+        });
+
+        function showAlert(message, type) {
+            alertContainer.innerHTML = `<div class="alert-box ${type}">${message}</div>`;
+            setTimeout(() => alertContainer.innerHTML = '', 5000);
+        }
+
+        function handleFile(file) {
+            const ext = '.' + file.name.split('.').pop().toLowerCase();
+            if (!ALLOWED_EXTENSIONS.includes(ext)) {
+                showAlert('❌ Formato no soportado. Usa MP4, AVI, MOV o MKV.', 'error');
+                return;
+            }
+            if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+                showAlert(`❌ El archivo es demasiado grande (máx ${MAX_SIZE_MB} MB).`, 'error');
+                return;
+            }
+            uploadFile(file);
+        }
+
+        function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('video', file);
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/upload', true);
+
+            progressContainer.style.display = 'block';
+
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const pct = (e.loaded / e.total) * 100;
+                    progressBar.style.width = pct + '%';
+                }
+            });
+
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    const data = JSON.parse(xhr.responseText);
+                    showAlert('✅ ' + data.message, 'success');
+                    videoNameEl.textContent = file.name;
+                    currentVideoCard.style.display = 'block';
+                    progressContainer.style.display = 'none';
+                    progressBar.style.width = '0%';
+                } else {
+                    const data = JSON.parse(xhr.responseText);
+                    showAlert('❌ ' + (data.error || 'Error al subir el video'), 'error');
+                    progressContainer.style.display = 'none';
+                    progressBar.style.width = '0%';
+                }
+            };
+
+            xhr.onerror = () => {
+                showAlert('❌ Error de conexión al subir el video.', 'error');
+                progressContainer.style.display = 'none';
+            };
+
+            xhr.send(formData);
+        }
+    </script>
+</body>
+</html>

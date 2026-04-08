@@ -1,0 +1,23 @@
+# Entornos virtuales
+venv/
+venv2/
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Modelos pesados
+*.h5
+*.pkl
+
+# Datos e imágenes subidas
+train_data/
+uploads/
+
+# Logs de instalación
+install_log.txt
+install_log_utf8.txt
+
+# Jupyter Notebook
+.ipynb_checkpoints/

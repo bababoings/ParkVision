@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delimitar Espacios - CETYS Parking</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <div class="app-header">
+            <h1>📐 Delimitar Espacios de Estacionamiento</h1>
+            <p class="subtitle">Dibuja rectángulos sobre la imagen para definir las zonas de interés (ROI)</p>
+        </div>
+
+        <div class="nav-bar">
+            <a href="/" class="nav-btn">🏠 Dashboard</a>
+            <a href="/upload" class="nav-btn">📤 Subir Video</a>
+            <a href="/space_picker" class="nav-btn active">📐 Delimitar Espacios</a>
+        </div>
+
+        <div id="alert-container"></div>
+
+        <div class="glass-card" style="margin-bottom: 1.5rem;">
+            <div class="card-body">
+                <div class="picker-toolbar">
+                    <label for="zone-select">Zona:</label>
+                    <select id="zone-select">
+                        <option value="Zona A">Zona A</option>
+                        <option value="Zona B">Zona B</option>
+                        <option value="Zona C">Zona C</option>
+                        <option value="Zona D">Zona D</option>
+                    </select>
+
+                    <button class="btn-danger-custom" id="btn-undo" title="Eliminar el último rectángulo">↩ Deshacer</button>
+                    <button class="btn-danger-custom" id="btn-clear" title="Limpiar todos los rectángulos">🗑 Limpiar Todo</button>
+                    <button class="btn-success-custom" id="btn-save">💾 Guardar Posiciones</button>
+
+                    <span id="space-count-label" style="margin-left: auto; color: var(--text-secondary); font-size: 0.85rem;">
+                        Espacios: <strong id="space-count-value">0</strong>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <div class="card-body" style="padding: 0; text-align: center;">
+                <div class="picker-canvas-container" id="canvas-container">
+                    <canvas id="picker-canvas"></canvas>
+                </div>
+                <div id="no-video-msg" style="padding: 3rem; color: var(--text-muted); display: none;">
+                    <p style="font-size: 1.2rem;">🎬 No hay video cargado</p>
+                    <p style="margin-top: 0.5rem;">Ve a la página de <a href="/upload" style="color: var(--accent-blue);">subir video</a> primero.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-card" style="margin-top: 1.5rem;" id="positions-list-card">
+            <div class="card-body">
+                <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: var(--accent-blue);">
+                    📋 Posiciones Definidas
+                </h3>
+                <div id="positions-table-container">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                        <thead>
+                            <tr style="color: var(--text-secondary); border-bottom: 1px solid var(--border-glass);">
+                                <th style="padding: 0.5rem; text-align: left;">#</th>
+                                <th style="padding: 0.5rem; text-align: left;">Zona</th>
+                                <th style="padding: 0.5rem; text-align: left;">X</th>
+                                <th style="padding: 0.5rem; text-align: left;">Y</th>
+                                <th style="padding: 0.5rem; text-align: left;">Ancho</th>
+                                <th style="padding: 0.5rem; text-align: left;">Alto</th>
+                                <th style="padding: 0.5rem; text-align: center;">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="positions-tbody"></tbody>
+                    </table>
+                </div>
+                <p id="no-positions-msg" style="color: var(--text-muted); text-align: center; padding: 1rem;">
+                    No hay posiciones definidas. Dibuja rectángulos sobre la imagen.
+                </p>
+            </div>
+        </div>
+
+        <div class="app-footer">
+            <p>© 2026 CETYS Universidad — Sistema de Detección de Estacionamiento</p>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('picker-canvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('canvas-container');
+        const noVideoMsg = document.getElementById('no-video-msg');
+        const zoneSelect = document.getElementById('zone-select');
+        const spaceCountValue = document.getElementById('space-count-value');
+        const alertContainer = document.getElementById('alert-container');
+        const positionsTbody = document.getElementById('positions-tbody');
+        const noPositionsMsg = document.getElementById('no-positions-msg');
+
+        const ZONE_COLORS = {
+            'Zona A': '#448aff',
+            'Zona B': '#00e676',
+            'Zona C': '#ffd740',
+            'Zona D': '#ff5252'
+        };
+
+        let bgImage = null;
+        let positions = []; // [{x, y, w, h, zone}, ...]
+        let isDrawing = false;
+        let startX = 0, startY = 0;
+        let scaleX = 1, scaleY = 1;
+
+        // Load first frame
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            bgImage = img;
+            canvas.width = img.width;
+            canvas.height = img.height;
+
+            // Scale canvas to fit container
+            const maxWidth = container.parentElement.clientWidth;
+            if (img.width > maxWidth) {
+                canvas.style.width = maxWidth + 'px';
+                canvas.style.height = (maxWidth * img.height / img.width) + 'px';
+            }
+            scaleX = canvas.width / canvas.offsetWidth;
+            scaleY = canvas.height / canvas.offsetHeight;
+
+            redraw();
+            loadExistingPositions();
+        };
+        img.onerror = () => {
+            canvas.style.display = 'none';
+            noVideoMsg.style.display = 'block';
+        };
+        img.src = '/first_frame?' + Date.now();
+
+        // Mouse events
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            startX = (e.clientX - rect.left) * scaleX;
+            startY = (e.clientY - rect.top) * scaleY;
+            isDrawing = true;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            const rect = canvas.getBoundingClientRect();
+            const curX = (e.clientX - rect.left) * scaleX;
+            const curY = (e.clientY - rect.top) * scaleY;
+            redraw();
+            // Draw preview rectangle
+            ctx.strokeStyle = ZONE_COLORS[zoneSelect.value] || '#448aff';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([8, 4]);
+            ctx.strokeRect(startX, startY, curX - startX, curY - startY);
+            ctx.setLineDash([]);
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (!isDrawing) return;
+            isDrawing = false;
+            const rect = canvas.getBoundingClientRect();
+            const endX = (e.clientX - rect.left) * scaleX;
+            const endY = (e.clientY - rect.top) * scaleY;
+
+            let x = Math.min(startX, endX);
+            let y = Math.min(startY, endY);
+            let w = Math.abs(endX - startX);
+            let h = Math.abs(endY - startY);
+
+            // Minimum size filter
+            if (w > 15 && h > 15) {
+                positions.push({
+                    x: Math.round(x),
+                    y: Math.round(y),
+                    w: Math.round(w),
+                    h: Math.round(h),
+                    zone: zoneSelect.value
+                });
+            }
+            redraw();
+            updatePositionsTable();
+        });
+
+        // Touch support
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            startX = (touch.clientX - rect.left) * scaleX;
+            startY = (touch.clientY - rect.top) * scaleY;
+            isDrawing = true;
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (!isDrawing) return;
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const curX = (touch.clientX - rect.left) * scaleX;
+            const curY = (touch.clientY - rect.top) * scaleY;
+            redraw();
+            ctx.strokeStyle = ZONE_COLORS[zoneSelect.value] || '#448aff';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([8, 4]);
+            ctx.strokeRect(startX, startY, curX - startX, curY - startY);
+            ctx.setLineDash([]);
+        });
+
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            if (!isDrawing) return;
+            isDrawing = false;
+            // Use last known position from touchmove
+            redraw();
+            updatePositionsTable();
+        });
+
+        function redraw() {
+            if (!bgImage) return;
+            ctx.drawImage(bgImage, 0, 0);
+
+            positions.forEach((pos, idx) => {
+                const color = ZONE_COLORS[pos.zone] || '#448aff';
+                // Fill with transparency
+                ctx.fillStyle = color + '25';
+                ctx.fillRect(pos.x, pos.y, pos.w, pos.h);
+                // Border
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                ctx.strokeRect(pos.x, pos.y, pos.w, pos.h);
+                // Label
+                const label = `${idx + 1}: ${pos.zone}`;
+                ctx.font = 'bold 14px Inter, sans-serif';
+                const textMetrics = ctx.measureText(label);
+                const textH = 20;
+                ctx.fillStyle = color;
+                ctx.fillRect(pos.x, pos.y - textH - 2, textMetrics.width + 10, textH + 2);
+                ctx.fillStyle = '#fff';
+                ctx.fillText(label, pos.x + 5, pos.y - 6);
+            });
+
+            spaceCountValue.textContent = positions.length;
+        }
+
+        function updatePositionsTable() {
+            if (positions.length === 0) {
+                noPositionsMsg.style.display = 'block';
+                positionsTbody.innerHTML = '';
+                return;
+            }
+            noPositionsMsg.style.display = 'none';
+            positionsTbody.innerHTML = positions.map((p, i) => `
+                <tr style="border-bottom: 1px solid var(--border-glass);">
+                    <td style="padding: 0.5rem;">${i + 1}</td>
+                    <td style="padding: 0.5rem;"><span style="color: ${ZONE_COLORS[p.zone] || '#448aff'}; font-weight: 600;">${p.zone}</span></td>
+                    <td style="padding: 0.5rem;">${p.x}</td>
+                    <td style="padding: 0.5rem;">${p.y}</td>
+                    <td style="padding: 0.5rem;">${p.w}</td>
+                    <td style="padding: 0.5rem;">${p.h}</td>
+                    <td style="padding: 0.5rem; text-align: center;">
+                        <button onclick="removePosition(${i})" style="background: none; border: none; color: var(--accent-red); cursor: pointer; font-size: 1rem;">✕</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function removePosition(index) {
+            positions.splice(index, 1);
+            redraw();
+            updatePositionsTable();
+        }
+
+        function showAlert(message, type) {
+            alertContainer.innerHTML = `<div class="alert-box ${type}">${message}</div>`;
+            setTimeout(() => alertContainer.innerHTML = '', 4000);
+        }
+
+        function loadExistingPositions() {
+            fetch('/load_positions')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.positions && data.positions.length > 0) {
+                        positions = data.positions;
+                        redraw();
+                        updatePositionsTable();
+                        showAlert(`📋 Se cargaron ${positions.length} posiciones existentes.`, 'info');
+                    }
+                })
+                .catch(() => {});
+        }
+
+        // Undo
+        document.getElementById('btn-undo').addEventListener('click', () => {
+            if (positions.length > 0) {
+                positions.pop();
+                redraw();
+                updatePositionsTable();
+            }
+        });
+
+        // Clear all
+        document.getElementById('btn-clear').addEventListener('click', () => {
+            if (positions.length > 0 && confirm('¿Eliminar todas las posiciones?')) {
+                positions = [];
+                redraw();
+                updatePositionsTable();
+            }
+        });
+
+        // Save
+        document.getElementById('btn-save').addEventListener('click', () => {
+            if (positions.length === 0) {
+                showAlert('⚠ No hay posiciones para guardar.', 'error');
+                return;
+            }
+
+            fetch('/save_positions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ positions: positions })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showAlert(`✅ ${positions.length} posiciones guardadas correctamente.`, 'success');
+                } else {
+                    showAlert('❌ ' + (data.error || 'Error al guardar'), 'error');
+                }
+            })
+            .catch(() => showAlert('❌ Error de conexión.', 'error'));
+        });
+
+        // Recalculate scale on resize
+        window.addEventListener('resize', () => {
+            if (bgImage) {
+                const maxWidth = container.parentElement.clientWidth;
+                if (bgImage.width > maxWidth) {
+                    canvas.style.width = maxWidth + 'px';
+                    canvas.style.height = (maxWidth * bgImage.height / bgImage.width) + 'px';
+                }
+                scaleX = canvas.width / canvas.offsetWidth;
+                scaleY = canvas.height / canvas.offsetHeight;
+            }
+        });
+    </script>
+</body>
+</html>

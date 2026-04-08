@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CETYS Parking — Detección en Tiempo Real</title>
+    <meta name="description"
+        content="Sistema de detección de disponibilidad de estacionamiento en tiempo real para CETYS Universidad">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <div class="app-header">
+            <h1>CETYS Parking Detection</h1>
+            <p class="subtitle">Sistema de Detección de Disponibilidad en Tiempo Real</p>
+        </div>
+
+        <div class="nav-bar">
+            <a href="/" class="nav-btn active">Dashboard</a>
+            <a href="/upload" class="nav-btn">Subir Video</a>
+            <a href="/space_picker" class="nav-btn">Delimitar Espacios</a>
+        </div>
+
+        <div class="timestamp" id="timestamp">Última actualización: —</div>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card blue">
+                <div class="stat-icon"></div>
+                <div class="stat-label">Total Espacios</div>
+                <div class="stat-value" id="stat-total">0</div>
+            </div>
+            <div class="stat-card green">
+                <div class="stat-icon"></div>
+                <div class="stat-label">Disponibles</div>
+                <div class="stat-value" id="stat-available">0</div>
+            </div>
+            <div class="stat-card red">
+                <div class="stat-icon"></div>
+                <div class="stat-label">Ocupados</div>
+                <div class="stat-value" id="stat-occupied">0</div>
+            </div>
+        </div>
+
+        <!-- Zone Breakdown -->
+        <div class="zones-grid" id="zones-container" style="display: none;"></div>
+
+        <!-- Video Feed -->
+        <div class="video-container" id="video-section">
+            <div class="glass-card">
+                <div class="video-header">
+                    <h3>Feed en Vivo</h3>
+                    <span class="live-badge">LIVE</span>
+                </div>
+                <img id="video-feed" src="/video_feed" alt="Video feed de estacionamiento"
+                    style="width: 100%; display: block;"
+                    onerror="this.style.display='none'; document.getElementById('no-feed-msg').style.display='block';">
+                <div id="no-feed-msg"
+                    style="display: none; padding: 3rem; text-align: center; color: var(--text-muted);">
+                    <p style="font-size: 1.2rem;">No hay video disponible</p>
+                    <p style="margin-top: 0.5rem;">
+                        <a href="/upload" style="color: var(--accent-blue);">Sube un video</a> para comenzar la
+                        detección.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="app-footer">
+            <p>© 2026 CETYS Universidad — Sistema Ubicuo de Detección de Estacionamiento</p>
+        </div>
+    </div>
+
+    <script>
+        const statTotal = document.getElementById('stat-total');
+        const statAvailable = document.getElementById('stat-available');
+        const statOccupied = document.getElementById('stat-occupied');
+        const timestampEl = document.getElementById('timestamp');
+        const zonesContainer = document.getElementById('zones-container');
+
+        const ZONE_COLORS = {
+            'Zona A': '#448aff',
+            'Zona B': '#00e676',
+            'Zona C': '#ffd740',
+            'Zona D': '#ff5252'
+        };
+
+        function updateSpaceCount() {
+            fetch('/space_count')
+                .then(r => r.json())
+                .then(data => {
+                    statTotal.textContent = data.total || 0;
+                    statAvailable.textContent = data.available || 0;
+                    statOccupied.textContent = data.occupied || 0;
+
+                    if (data.timestamp) {
+                        timestampEl.textContent = 'Última actualización: ' + data.timestamp;
+                    }
+
+                    // Render zones
+                    if (data.zones && Object.keys(data.zones).length > 0) {
+                        zonesContainer.style.display = 'grid';
+                        zonesContainer.innerHTML = Object.entries(data.zones).map(([name, z]) => `
+                            <div class="zone-card">
+                                <div class="zone-name" style="color: ${ZONE_COLORS[name] || 'var(--accent-blue)'}">📍 ${name}</div>
+                                <div class="zone-stats">
+                                    <div class="zone-stat">
+                                        <div class="zone-stat-value" style="color: var(--accent-blue);">${z.total}</div>
+                                        <div class="zone-stat-label">Total</div>
+                                    </div>
+                                    <div class="zone-stat">
+                                        <div class="zone-stat-value" style="color: var(--accent-green);">${z.available}</div>
+                                        <div class="zone-stat-label">Disponibles</div>
+                                    </div>
+                                    <div class="zone-stat">
+                                        <div class="zone-stat-value" style="color: var(--accent-red);">${z.occupied}</div>
+                                        <div class="zone-stat-label">Ocupados</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        zonesContainer.style.display = 'none';
+                    }
+                })
+                .catch(() => { });
+        }
+
+        // Initial load + periodic update
+        updateSpaceCount();
+        setInterval(updateSpaceCount, 2000);
+    </script>
+</body>
+
+</html>
