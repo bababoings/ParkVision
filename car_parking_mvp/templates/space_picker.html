@@ -5,12 +5,123 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Delimitar Espacios - CETYS Parking</title>
     <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .point-progress {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-glass);
+            border-radius: 50px;
+            padding: 0.4rem 1rem;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--accent-blue);
+            transition: var(--transition);
+        }
+        .point-progress.active {
+            border-color: var(--accent-amber);
+            color: var(--accent-amber);
+            box-shadow: 0 0 12px rgba(255, 215, 64, 0.2);
+        }
+        .point-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--border-glass);
+            transition: var(--transition);
+        }
+        .point-dot.filled {
+            background: var(--accent-amber);
+            box-shadow: 0 0 6px rgba(255, 215, 64, 0.5);
+        }
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .slider-group input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100px;
+            height: 6px;
+            background: var(--bg-secondary);
+            border-radius: 3px;
+            outline: none;
+            border: none;
+            padding: 0;
+        }
+        .slider-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent-blue);
+            cursor: pointer;
+            box-shadow: 0 0 8px rgba(68, 138, 255, 0.4);
+        }
+        .slider-group input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent-blue);
+            cursor: pointer;
+            border: none;
+        }
+        .slider-value {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            min-width: 28px;
+            text-align: center;
+        }
+        .btn-warning-custom {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.7rem 1.6rem;
+            background: linear-gradient(135deg, #ffd740, #ffab00);
+            color: #1a1a2e;
+            border: none;
+            border-radius: 50px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: var(--transition);
+            font-family: 'Inter', sans-serif;
+        }
+        .btn-warning-custom:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 20px rgba(255, 215, 64, 0.3);
+        }
+        .toolbar-separator {
+            width: 1px;
+            height: 24px;
+            background: var(--border-glass);
+            margin: 0 0.25rem;
+        }
+        .instructions-banner {
+            background: var(--accent-blue-dim);
+            border: 1px solid rgba(68, 138, 255, 0.2);
+            border-radius: var(--radius-sm);
+            padding: 0.8rem 1.2rem;
+            margin-bottom: 1.5rem;
+            font-size: 0.85rem;
+            color: var(--accent-blue);
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        .instructions-banner .icon {
+            font-size: 1.2rem;
+        }
+    </style>
 </head>
 <body>
     <div class="app-container">
         <div class="app-header">
             <h1>📐 Delimitar Espacios de Estacionamiento</h1>
-            <p class="subtitle">Dibuja rectángulos sobre la imagen para definir las zonas de interés (ROI)</p>
+            <p class="subtitle">Haz clic en las 4 esquinas de cada cajón para definir las zonas de interés</p>
         </div>
 
         <div class="nav-bar">
@@ -20,6 +131,11 @@
         </div>
 
         <div id="alert-container"></div>
+
+        <div class="instructions-banner">
+            <span class="icon">💡</span>
+            <span>Haz clic en las <strong>4 esquinas</strong> de cada cajón de estacionamiento. El polígono se cerrará automáticamente al colocar el 4to punto.</span>
+        </div>
 
         <div class="glass-card" style="margin-bottom: 1.5rem;">
             <div class="card-body">
@@ -32,12 +148,33 @@
                         <option value="Zona D">Zona D</option>
                     </select>
 
-                    <button class="btn-danger-custom" id="btn-undo" title="Eliminar el último rectángulo">↩ Deshacer</button>
-                    <button class="btn-danger-custom" id="btn-clear" title="Limpiar todos los rectángulos">🗑 Limpiar Todo</button>
+                    <div class="toolbar-separator"></div>
+
+                    <div class="slider-group">
+                        <label for="point-size-slider">⊙ Punto:</label>
+                        <input type="range" id="point-size-slider" min="3" max="20" value="8">
+                        <span class="slider-value" id="point-size-value">8</span>
+                    </div>
+
+                    <div class="toolbar-separator"></div>
+
+                    <div class="point-progress" id="point-progress">
+                        <span id="point-progress-text">Punto 0/4</span>
+                        <span class="point-dot" id="dot-1"></span>
+                        <span class="point-dot" id="dot-2"></span>
+                        <span class="point-dot" id="dot-3"></span>
+                        <span class="point-dot" id="dot-4"></span>
+                    </div>
+
+                    <div class="toolbar-separator"></div>
+
+                    <button class="btn-warning-custom" id="btn-cancel-point" title="Cancelar el último punto colocado">↩ Cancelar Punto</button>
+                    <button class="btn-danger-custom" id="btn-undo" title="Eliminar el último cajón completo">🗑 Deshacer Cajón</button>
+                    <button class="btn-danger-custom" id="btn-clear" title="Limpiar todos los cajones">🗑 Limpiar Todo</button>
                     <button class="btn-success-custom" id="btn-save">💾 Guardar Posiciones</button>
 
                     <span id="space-count-label" style="margin-left: auto; color: var(--text-secondary); font-size: 0.85rem;">
-                        Espacios: <strong id="space-count-value">0</strong>
+                        Cajones: <strong id="space-count-value">0</strong>
                     </span>
                 </div>
             </div>
@@ -58,18 +195,18 @@
         <div class="glass-card" style="margin-top: 1.5rem;" id="positions-list-card">
             <div class="card-body">
                 <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: var(--accent-blue);">
-                    📋 Posiciones Definidas
+                    📋 Cajones Definidos
                 </h3>
                 <div id="positions-table-container">
-                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
                         <thead>
                             <tr style="color: var(--text-secondary); border-bottom: 1px solid var(--border-glass);">
                                 <th style="padding: 0.5rem; text-align: left;">#</th>
                                 <th style="padding: 0.5rem; text-align: left;">Zona</th>
-                                <th style="padding: 0.5rem; text-align: left;">X</th>
-                                <th style="padding: 0.5rem; text-align: left;">Y</th>
-                                <th style="padding: 0.5rem; text-align: left;">Ancho</th>
-                                <th style="padding: 0.5rem; text-align: left;">Alto</th>
+                                <th style="padding: 0.5rem; text-align: left;">P1 (x,y)</th>
+                                <th style="padding: 0.5rem; text-align: left;">P2 (x,y)</th>
+                                <th style="padding: 0.5rem; text-align: left;">P3 (x,y)</th>
+                                <th style="padding: 0.5rem; text-align: left;">P4 (x,y)</th>
                                 <th style="padding: 0.5rem; text-align: center;">Acción</th>
                             </tr>
                         </thead>
@@ -77,7 +214,7 @@
                     </table>
                 </div>
                 <p id="no-positions-msg" style="color: var(--text-muted); text-align: center; padding: 1rem;">
-                    No hay posiciones definidas. Dibuja rectángulos sobre la imagen.
+                    No hay cajones definidos. Haz clic en las 4 esquinas de cada cajón sobre la imagen.
                 </p>
             </div>
         </div>
@@ -88,6 +225,9 @@
     </div>
 
     <script>
+        // =====================================================================
+        // DOM References
+        // =====================================================================
         const canvas = document.getElementById('picker-canvas');
         const ctx = canvas.getContext('2d');
         const container = document.getElementById('canvas-container');
@@ -97,6 +237,10 @@
         const alertContainer = document.getElementById('alert-container');
         const positionsTbody = document.getElementById('positions-tbody');
         const noPositionsMsg = document.getElementById('no-positions-msg');
+        const pointSizeSlider = document.getElementById('point-size-slider');
+        const pointSizeValue = document.getElementById('point-size-value');
+        const pointProgressText = document.getElementById('point-progress-text');
+        const pointProgress = document.getElementById('point-progress');
 
         const ZONE_COLORS = {
             'Zona A': '#448aff',
@@ -105,13 +249,19 @@
             'Zona D': '#ff5252'
         };
 
+        // =====================================================================
+        // State
+        // =====================================================================
         let bgImage = null;
-        let positions = []; // [{x, y, w, h, zone}, ...]
-        let isDrawing = false;
-        let startX = 0, startY = 0;
+        let positions = [];       // Completed quads: [{points: [[x,y],...], zone}, ...]
+        let currentPoints = [];   // Points being placed for the current quad (0-3 points)
+        let mousePos = null;      // Current mouse position for preview line
         let scaleX = 1, scaleY = 1;
+        let pointRadius = 8;      // Controlled by slider
 
-        // Load first frame
+        // =====================================================================
+        // Load background image (first frame of video)
+        // =====================================================================
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
@@ -119,7 +269,6 @@
             canvas.width = img.width;
             canvas.height = img.height;
 
-            // Scale canvas to fit container
             const maxWidth = container.parentElement.clientWidth;
             if (img.width > maxWidth) {
                 canvas.style.width = maxWidth + 'px';
@@ -137,115 +286,245 @@
         };
         img.src = '/first_frame?' + Date.now();
 
-        // Mouse events
-        canvas.addEventListener('mousedown', (e) => {
+        // =====================================================================
+        // Slider for point diameter
+        // =====================================================================
+        pointSizeSlider.addEventListener('input', (e) => {
+            pointRadius = parseInt(e.target.value);
+            pointSizeValue.textContent = pointRadius;
+            redraw();
+        });
+
+        // =====================================================================
+        // Canvas mouse position helper
+        // =====================================================================
+        function getCanvasPos(e) {
             const rect = canvas.getBoundingClientRect();
-            startX = (e.clientX - rect.left) * scaleX;
-            startY = (e.clientY - rect.top) * scaleY;
-            isDrawing = true;
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+
+        function getTouchPos(touch) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: (touch.clientX - rect.left) * scaleX,
+                y: (touch.clientY - rect.top) * scaleY
+            };
+        }
+
+        // =====================================================================
+        // Mouse / Touch Events
+        // =====================================================================
+        canvas.addEventListener('click', (e) => {
+            const pos = getCanvasPos(e);
+            addPoint(pos.x, pos.y);
         });
 
         canvas.addEventListener('mousemove', (e) => {
-            if (!isDrawing) return;
-            const rect = canvas.getBoundingClientRect();
-            const curX = (e.clientX - rect.left) * scaleX;
-            const curY = (e.clientY - rect.top) * scaleY;
-            redraw();
-            // Draw preview rectangle
-            ctx.strokeStyle = ZONE_COLORS[zoneSelect.value] || '#448aff';
-            ctx.lineWidth = 3;
-            ctx.setLineDash([8, 4]);
-            ctx.strokeRect(startX, startY, curX - startX, curY - startY);
-            ctx.setLineDash([]);
+            mousePos = getCanvasPos(e);
+            if (currentPoints.length > 0) {
+                redraw();
+            }
         });
 
-        canvas.addEventListener('mouseup', (e) => {
-            if (!isDrawing) return;
-            isDrawing = false;
-            const rect = canvas.getBoundingClientRect();
-            const endX = (e.clientX - rect.left) * scaleX;
-            const endY = (e.clientY - rect.top) * scaleY;
-
-            let x = Math.min(startX, endX);
-            let y = Math.min(startY, endY);
-            let w = Math.abs(endX - startX);
-            let h = Math.abs(endY - startY);
-
-            // Minimum size filter
-            if (w > 15 && h > 15) {
-                positions.push({
-                    x: Math.round(x),
-                    y: Math.round(y),
-                    w: Math.round(w),
-                    h: Math.round(h),
-                    zone: zoneSelect.value
-                });
+        canvas.addEventListener('mouseleave', () => {
+            mousePos = null;
+            if (currentPoints.length > 0) {
+                redraw();
             }
-            redraw();
-            updatePositionsTable();
         });
 
         // Touch support
         canvas.addEventListener('touchstart', (e) => {
             e.preventDefault();
-            const touch = e.touches[0];
-            const rect = canvas.getBoundingClientRect();
-            startX = (touch.clientX - rect.left) * scaleX;
-            startY = (touch.clientY - rect.top) * scaleY;
-            isDrawing = true;
+            const pos = getTouchPos(e.touches[0]);
+            addPoint(pos.x, pos.y);
         });
 
         canvas.addEventListener('touchmove', (e) => {
             e.preventDefault();
-            if (!isDrawing) return;
-            const touch = e.touches[0];
-            const rect = canvas.getBoundingClientRect();
-            const curX = (touch.clientX - rect.left) * scaleX;
-            const curY = (touch.clientY - rect.top) * scaleY;
-            redraw();
-            ctx.strokeStyle = ZONE_COLORS[zoneSelect.value] || '#448aff';
-            ctx.lineWidth = 3;
-            ctx.setLineDash([8, 4]);
-            ctx.strokeRect(startX, startY, curX - startX, curY - startY);
-            ctx.setLineDash([]);
+            mousePos = getTouchPos(e.touches[0]);
+            if (currentPoints.length > 0) {
+                redraw();
+            }
         });
 
-        canvas.addEventListener('touchend', (e) => {
-            e.preventDefault();
-            if (!isDrawing) return;
-            isDrawing = false;
-            // Use last known position from touchmove
-            redraw();
-            updatePositionsTable();
-        });
+        // =====================================================================
+        // Core Logic: Add a point
+        // =====================================================================
+        function addPoint(x, y) {
+            x = Math.round(x);
+            y = Math.round(y);
 
+            currentPoints.push([x, y]);
+            updatePointProgress();
+
+            if (currentPoints.length === 4) {
+                // Complete quad — add to positions
+                positions.push({
+                    points: [...currentPoints],
+                    zone: zoneSelect.value
+                });
+                currentPoints = [];
+                updatePointProgress();
+                updatePositionsTable();
+            }
+
+            redraw();
+        }
+
+        // =====================================================================
+        // Drawing
+        // =====================================================================
         function redraw() {
             if (!bgImage) return;
             ctx.drawImage(bgImage, 0, 0);
 
+            // Draw completed quads
             positions.forEach((pos, idx) => {
-                const color = ZONE_COLORS[pos.zone] || '#448aff';
-                // Fill with transparency
-                ctx.fillStyle = color + '25';
-                ctx.fillRect(pos.x, pos.y, pos.w, pos.h);
-                // Border
-                ctx.strokeStyle = color;
-                ctx.lineWidth = 3;
-                ctx.strokeRect(pos.x, pos.y, pos.w, pos.h);
-                // Label
-                const label = `${idx + 1}: ${pos.zone}`;
-                ctx.font = 'bold 14px Inter, sans-serif';
-                const textMetrics = ctx.measureText(label);
-                const textH = 20;
-                ctx.fillStyle = color;
-                ctx.fillRect(pos.x, pos.y - textH - 2, textMetrics.width + 10, textH + 2);
-                ctx.fillStyle = '#fff';
-                ctx.fillText(label, pos.x + 5, pos.y - 6);
+                drawQuad(pos.points, pos.zone, idx);
             });
+
+            // Draw in-progress points
+            if (currentPoints.length > 0) {
+                const color = ZONE_COLORS[zoneSelect.value] || '#448aff';
+
+                // Draw lines between placed points
+                ctx.beginPath();
+                ctx.moveTo(currentPoints[0][0], currentPoints[0][1]);
+                for (let i = 1; i < currentPoints.length; i++) {
+                    ctx.lineTo(currentPoints[i][0], currentPoints[i][1]);
+                }
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([8, 4]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Preview line from last point to mouse
+                if (mousePos && currentPoints.length < 4) {
+                    const lastPt = currentPoints[currentPoints.length - 1];
+                    ctx.beginPath();
+                    ctx.moveTo(lastPt[0], lastPt[1]);
+                    ctx.lineTo(mousePos.x, mousePos.y);
+                    ctx.strokeStyle = color + '80';
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([4, 4]);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // If 3 points placed, also show closing line preview
+                    if (currentPoints.length === 3) {
+                        ctx.beginPath();
+                        ctx.moveTo(mousePos.x, mousePos.y);
+                        ctx.lineTo(currentPoints[0][0], currentPoints[0][1]);
+                        ctx.strokeStyle = color + '50';
+                        ctx.lineWidth = 1;
+                        ctx.setLineDash([4, 4]);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                }
+
+                // Draw corner points
+                currentPoints.forEach((pt, i) => {
+                    ctx.beginPath();
+                    ctx.arc(pt[0], pt[1], pointRadius, 0, Math.PI * 2);
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    // Point number
+                    ctx.font = `bold ${Math.max(10, pointRadius)}px Inter, sans-serif`;
+                    ctx.fillStyle = '#fff';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(i + 1, pt[0], pt[1]);
+                });
+            }
 
             spaceCountValue.textContent = positions.length;
         }
 
+        function drawQuad(points, zone, index) {
+            const color = ZONE_COLORS[zone] || '#448aff';
+
+            // Fill polygon with transparency
+            ctx.beginPath();
+            ctx.moveTo(points[0][0], points[0][1]);
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i][0], points[i][1]);
+            }
+            ctx.closePath();
+            ctx.fillStyle = color + '25';
+            ctx.fill();
+
+            // Stroke polygon
+            ctx.beginPath();
+            ctx.moveTo(points[0][0], points[0][1]);
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i][0], points[i][1]);
+            }
+            ctx.closePath();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // Corner points
+            points.forEach((pt) => {
+                ctx.beginPath();
+                ctx.arc(pt[0], pt[1], pointRadius * 0.7, 0, Math.PI * 2);
+                ctx.fillStyle = color;
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            });
+
+            // Label at centroid
+            const cx = points.reduce((s, p) => s + p[0], 0) / 4;
+            const cy = points.reduce((s, p) => s + p[1], 0) / 4;
+            const label = `${index + 1}: ${zone}`;
+            ctx.font = 'bold 14px Inter, sans-serif';
+            const textMetrics = ctx.measureText(label);
+            const textH = 20;
+            const textW = textMetrics.width + 10;
+
+            // Find top-most point for label positioning
+            const minY = Math.min(...points.map(p => p[1]));
+            const labelX = cx - textW / 2;
+            const labelY = minY - textH - 6;
+
+            ctx.fillStyle = color;
+            ctx.fillRect(labelX, labelY, textW, textH + 2);
+            ctx.fillStyle = '#fff';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+            ctx.fillText(label, labelX + 5, labelY + textH - 4);
+        }
+
+        // =====================================================================
+        // Point Progress Indicator
+        // =====================================================================
+        function updatePointProgress() {
+            const count = currentPoints.length;
+            pointProgressText.textContent = `Punto ${count}/4`;
+
+            for (let i = 1; i <= 4; i++) {
+                const dot = document.getElementById(`dot-${i}`);
+                dot.classList.toggle('filled', i <= count);
+            }
+
+            pointProgress.classList.toggle('active', count > 0);
+        }
+
+        // =====================================================================
+        // Positions Table
+        // =====================================================================
         function updatePositionsTable() {
             if (positions.length === 0) {
                 noPositionsMsg.style.display = 'block';
@@ -253,19 +532,21 @@
                 return;
             }
             noPositionsMsg.style.display = 'none';
-            positionsTbody.innerHTML = positions.map((p, i) => `
+            positionsTbody.innerHTML = positions.map((p, i) => {
+                const pts = p.points;
+                return `
                 <tr style="border-bottom: 1px solid var(--border-glass);">
                     <td style="padding: 0.5rem;">${i + 1}</td>
                     <td style="padding: 0.5rem;"><span style="color: ${ZONE_COLORS[p.zone] || '#448aff'}; font-weight: 600;">${p.zone}</span></td>
-                    <td style="padding: 0.5rem;">${p.x}</td>
-                    <td style="padding: 0.5rem;">${p.y}</td>
-                    <td style="padding: 0.5rem;">${p.w}</td>
-                    <td style="padding: 0.5rem;">${p.h}</td>
+                    <td style="padding: 0.5rem;">${pts[0][0]}, ${pts[0][1]}</td>
+                    <td style="padding: 0.5rem;">${pts[1][0]}, ${pts[1][1]}</td>
+                    <td style="padding: 0.5rem;">${pts[2][0]}, ${pts[2][1]}</td>
+                    <td style="padding: 0.5rem;">${pts[3][0]}, ${pts[3][1]}</td>
                     <td style="padding: 0.5rem; text-align: center;">
                         <button onclick="removePosition(${i})" style="background: none; border: none; color: var(--accent-red); cursor: pointer; font-size: 1rem;">✕</button>
                     </td>
-                </tr>
-            `).join('');
+                </tr>`;
+            }).join('');
         }
 
         function removePosition(index) {
@@ -274,11 +555,17 @@
             updatePositionsTable();
         }
 
+        // =====================================================================
+        // Alerts
+        // =====================================================================
         function showAlert(message, type) {
             alertContainer.innerHTML = `<div class="alert-box ${type}">${message}</div>`;
             setTimeout(() => alertContainer.innerHTML = '', 4000);
         }
 
+        // =====================================================================
+        // Load / Save
+        // =====================================================================
         function loadExistingPositions() {
             fetch('/load_positions')
                 .then(r => r.json())
@@ -287,13 +574,22 @@
                         positions = data.positions;
                         redraw();
                         updatePositionsTable();
-                        showAlert(`📋 Se cargaron ${positions.length} posiciones existentes.`, 'info');
+                        showAlert(`📋 Se cargaron ${positions.length} cajones existentes.`, 'info');
                     }
                 })
                 .catch(() => {});
         }
 
-        // Undo
+        // Cancel last point (while placing)
+        document.getElementById('btn-cancel-point').addEventListener('click', () => {
+            if (currentPoints.length > 0) {
+                currentPoints.pop();
+                updatePointProgress();
+                redraw();
+            }
+        });
+
+        // Undo last completed quad
         document.getElementById('btn-undo').addEventListener('click', () => {
             if (positions.length > 0) {
                 positions.pop();
@@ -304,8 +600,10 @@
 
         // Clear all
         document.getElementById('btn-clear').addEventListener('click', () => {
-            if (positions.length > 0 && confirm('¿Eliminar todas las posiciones?')) {
+            if ((positions.length > 0 || currentPoints.length > 0) && confirm('¿Eliminar todos los cajones?')) {
                 positions = [];
+                currentPoints = [];
+                updatePointProgress();
                 redraw();
                 updatePositionsTable();
             }
@@ -314,7 +612,12 @@
         // Save
         document.getElementById('btn-save').addEventListener('click', () => {
             if (positions.length === 0) {
-                showAlert('⚠ No hay posiciones para guardar.', 'error');
+                showAlert('⚠ No hay cajones para guardar.', 'error');
+                return;
+            }
+
+            if (currentPoints.length > 0) {
+                showAlert('⚠ Tienes un cajón incompleto. Complétalo o cancélalo antes de guardar.', 'error');
                 return;
             }
 
@@ -326,12 +629,28 @@
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
-                    showAlert(`✅ ${positions.length} posiciones guardadas correctamente.`, 'success');
+                    showAlert(`✅ ${positions.length} cajones guardados correctamente.`, 'success');
                 } else {
                     showAlert('❌ ' + (data.error || 'Error al guardar'), 'error');
                 }
             })
             .catch(() => showAlert('❌ Error de conexión.', 'error'));
+        });
+
+        // Keyboard shortcut: Escape cancels current point
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && currentPoints.length > 0) {
+                currentPoints = [];
+                updatePointProgress();
+                redraw();
+            }
+            // Ctrl+Z undoes last quad
+            if (e.key === 'z' && (e.ctrlKey || e.metaKey) && positions.length > 0) {
+                e.preventDefault();
+                positions.pop();
+                redraw();
+                updatePositionsTable();
+            }
         });
 
         // Recalculate scale on resize

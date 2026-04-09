@@ -44,7 +44,7 @@ app_state = {
     "video_path": None,
     "cap": None,
     "cap_lock": threading.Lock(),
-    "positions": [],          # List of {x, y, w, h, zone}
+    "positions": [],          # List of {points: [[x1,y1],...,[x4,y4]], zone}
     "zones": {},              # {"Zona A": [indices...]}
     "model": None,
     "class_dictionary": {0: 'Disponible', 1: 'Ocupado'},
@@ -82,7 +82,7 @@ def load_model_lazy():
 
 
 def load_positions():
-    """Load positions from pickle file, supporting old and new formats."""
+    """Load positions from pickle file. Expects new format: {points, zone}."""
     if not os.path.exists(POSITIONS_FILE):
         app_state["positions"] = []
         app_state["zones"] = {}
@@ -92,17 +92,14 @@ def load_positions():
         with open(POSITIONS_FILE, 'rb') as f:
             data = pickle.load(f)
 
-        # Support new format: list of dicts with {x, y, w, h, zone}
         if isinstance(data, list) and len(data) > 0:
-            if isinstance(data[0], dict):
+            if isinstance(data[0], dict) and 'points' in data[0]:
+                # New format: {points: [[x1,y1],...,[x4,y4]], zone}
                 app_state["positions"] = data
             else:
-                # Legacy format: list of tuples (x, y)
-                # Convert to new format with default w=130, h=65
-                app_state["positions"] = [
-                    {"x": pos[0], "y": pos[1], "w": 130, "h": 65, "zone": "Zona A"}
-                    for pos in data
-                ]
+                print("[WARNING] Old format detected in .pkl. Ignoring. "
+                      "Please re-define spaces using the SpacePicker.")
+                app_state["positions"] = []
         else:
             app_state["positions"] = []
 
@@ -152,11 +149,33 @@ def init_video(video_path=None):
 # =============================================================================
 # Detection Logic
 # =============================================================================
+def crop_quadrilateral(img, points, output_size=(96, 96)):
+    """
+    Extract image within a quadrilateral using perspective transform.
+
+    Args:
+        img: Full frame (numpy array)
+        points: List of 4 points [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+        output_size: Output size (width, height)
+
+    Returns:
+        Rectified image of the specified size
+    """
+    src_pts = np.array(points, dtype=np.float32)
+    w, h = output_size
+    dst_pts = np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float32)
+
+    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+    warped = cv2.warpPerspective(img, M, (w, h))
+    return warped
+
+
 def check_parking_spaces(img):
     """
     Analyze parking spaces in the given frame.
 
-    Uses the model to predict occupancy and applies anti-flicker logic
+    Uses perspective transform to extract quadrilateral regions,
+    then the model to predict occupancy. Applies anti-flicker logic
     based on confidence threshold (VPD-01 Alternative).
 
     Returns:
@@ -172,21 +191,17 @@ def check_parking_spaces(img):
     img_crops = []
 
     for pos in positions:
-        x, y, w, h = pos["x"], pos["y"], pos["w"], pos["h"]
-        # Clamp coordinates to frame boundaries
-        y1 = max(0, y)
-        y2 = min(img.shape[0], y + h)
-        x1 = max(0, x)
-        x2 = min(img.shape[1], x + w)
-
-        if y2 <= y1 or x2 <= x1:
+        points = pos.get("points", [])
+        if len(points) != 4:
             img_crops.append(np.zeros((*input_size, 3)))
             continue
 
-        crop = img[y1:y2, x1:x2]
-        resized = cv2.resize(crop, input_size)
-        normalized = resized / 255.0
-        img_crops.append(normalized)
+        try:
+            warped = crop_quadrilateral(img, points, input_size)
+            normalized = warped / 255.0
+            img_crops.append(normalized)
+        except Exception:
+            img_crops.append(np.zeros((*input_size, 3)))
 
     img_crops = np.array(img_crops)
     predictions = model.predict(img_crops, verbose=0)
@@ -196,8 +211,12 @@ def check_parking_spaces(img):
     zone_stats = {}
 
     for i, pos in enumerate(positions):
-        x, y, w, h = pos["x"], pos["y"], pos["w"], pos["h"]
+        points = pos.get("points", [])
+        if len(points) != 4:
+            continue
+
         zone = pos.get("zone", "Zona A")
+        pts_np = np.array(points, dtype=np.int32)
 
         confidence = float(np.max(predictions[i]))
         predicted_class = int(np.argmax(predictions[i]))
@@ -223,20 +242,27 @@ def check_parking_spaces(img):
             text_color = (255, 255, 255)
             occupied += 1
 
-        # Draw rectangle
-        cv2.rectangle(img, (x, y), (x + w, y + h), color, thickness)
+        # Draw quadrilateral
+        cv2.polylines(img, [pts_np], isClosed=True, color=color,
+                      thickness=thickness)
+        # Semi-transparent fill
+        overlay = img.copy()
+        cv2.fillPoly(overlay, [pts_np], color)
+        cv2.addWeighted(overlay, 0.15, img, 0.85, 0, img)
 
-        # Draw label with confidence
+        # Draw label at centroid
+        cx = int(np.mean(pts_np[:, 0]))
+        cy = int(np.mean(pts_np[:, 1]))
         display_text = f"{label} ({confidence:.0%})"
         font_scale = 0.45
         text_thickness = 1
         text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX,
                                     font_scale, text_thickness)[0]
-        text_x = x
-        text_y = y + h - 5
-        cv2.rectangle(img, (text_x, text_y - text_size[1] - 5),
-                      (text_x + text_size[0] + 6, text_y + 2), color, -1)
-        cv2.putText(img, display_text, (text_x + 3, text_y - 3),
+        text_x = cx - text_size[0] // 2
+        text_y = cy + text_size[1] // 2
+        cv2.rectangle(img, (text_x - 3, text_y - text_size[1] - 5),
+                      (text_x + text_size[0] + 3, text_y + 2), color, -1)
+        cv2.putText(img, display_text, (text_x, text_y - 3),
                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_color,
                     text_thickness)
 
@@ -425,17 +451,22 @@ def first_frame():
 
 @app.route('/save_positions', methods=['POST'])
 def save_positions():
-    """Guarda las posiciones definidas desde el SpacePicker."""
+    """Guarda las posiciones definidas desde el SpacePicker (formato 4 puntos)."""
     data = request.get_json()
     if not data or 'positions' not in data:
         return jsonify(error="No se recibieron posiciones"), 400
 
     positions = data['positions']
 
-    # Validate
-    for p in positions:
-        if not all(k in p for k in ('x', 'y', 'w', 'h', 'zone')):
-            return jsonify(error="Formato de posición inválido"), 400
+    # Validate: each position must have 'points' (4 items of [x,y]) and 'zone'
+    for i, p in enumerate(positions):
+        if 'points' not in p or 'zone' not in p:
+            return jsonify(error=f"Cajón {i+1}: formato inválido (falta 'points' o 'zone')"), 400
+        if not isinstance(p['points'], list) or len(p['points']) != 4:
+            return jsonify(error=f"Cajón {i+1}: se requieren exactamente 4 puntos"), 400
+        for j, pt in enumerate(p['points']):
+            if not isinstance(pt, list) or len(pt) != 2:
+                return jsonify(error=f"Cajón {i+1}, punto {j+1}: formato inválido"), 400
 
     # Save to pickle
     try:
