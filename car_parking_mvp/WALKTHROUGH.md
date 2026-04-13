@@ -208,8 +208,8 @@ La conexión requiere credenciales sensibles que **nunca deben subirse a GitHub*
 SUPABASE_URL=https://<TU-PROYECTO>.supabase.co
 SUPABASE_KEY=ey... (TU CLAVE)
 ```
--El "SUPABASE_URL" se encuentra en "Integrations -> Data API". Ahi mismo hay un apartado que dice "API URL".
--El "SUPABASE_KEY" se encuentra en "Settings -> API Keys". Ahi mismo hay un apartado que dice "Legacy anon, service_role API keys" y dentro de ese apartado hay un apartado que dice "anon" "public".
+- El "SUPABASE_URL" se encuentra en "Integrations -> Data API". Ahi mismo hay un apartado que dice "API URL".
+- El "SUPABASE_KEY" se encuentra en "Settings -> API Keys". Ahi mismo hay un apartado que dice "Legacy anon, service_role API keys" y dentro de ese apartado hay un apartado que dice "anon" "public".
 **Sobre la Clave (RLS Policies):**
 El script de sincronización realiza operaciones combinadas de inserción y actualización (`upsert`).
 - Si utilizas la clave pública (`anon`), **obligatoriamente** debes configurar las políticas de Row Level Security (RLS) en el panel de Supabase. Deberás permitir políticas `WITH CHECK ( true )` para Insert y Update.
