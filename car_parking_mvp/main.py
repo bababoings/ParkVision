@@ -23,7 +23,30 @@ import numpy as np
 from flask import Flask, render_template, Response, jsonify, request
 
 from preprocessing import preprocess_frame
+import requests
+from dotenv import load_dotenv
 
+# Load env variables - use explicit path relative to this script
+_env_path = os.path.join(os.path.dirname(__file__), '.env')
+load_dotenv(_env_path)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+print(f"[DEBUG] .env path: {_env_path}", flush=True)
+print(f"[DEBUG] SUPABASE_URL loaded: {'YES' if SUPABASE_URL else 'NO'}", flush=True)
+print(f"[DEBUG] SUPABASE_KEY loaded: {'YES' if SUPABASE_KEY else 'NO'}", flush=True)
+
+# Initialize Supabase client
+supabase = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        from supabase import create_client, Client
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print("[INFO] Supabase client initialized.", flush=True)
+    except Exception as e:
+        print(f"[ERROR] Failed to init Supabase: {e}", flush=True)
+else:
+    print("[WARNING] Supabase credentials not found. Sync disabled.", flush=True)
 # =============================================================================
 # App Configuration
 # =============================================================================
@@ -272,6 +295,14 @@ def check_parking_spaces(img):
         zone_stats[zone]["total"] += 1
         zone_stats[zone]["available" if is_available else "occupied"] += 1
 
+    # Calculate availability confidence per zone (ratio of available spaces to total)
+    for zone, stats in zone_stats.items():
+        if stats["total"] > 0:
+            av_confidence = stats["available"] / stats["total"]
+            stats["confidence"] = round(av_confidence, 2)
+        else:
+            stats["confidence"] = 0.0
+
     return img, available, occupied, zone_stats
 
 
@@ -490,9 +521,60 @@ def load_positions_route():
 # =============================================================================
 # Startup
 # =============================================================================
+
+def sync_supabase_worker():
+    """Background thread to sync data to Supabase periodically."""
+    print("[INFO] Supabase sync background worker started.")
+    time.sleep(5)  # Wait for startup
+    while True:
+        try:
+            if not supabase:
+                time.sleep(30)
+                continue
+
+            with app_state["cap_lock"]:
+                cap = app_state["cap"]
+                if cap is None or not cap.isOpened():
+                    time.sleep(5)
+                    continue
+
+                success, img = cap.read()
+                if not success:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    success, img = cap.read()
+            
+            if success:
+                processed, _, _ = preprocess_frame(img)
+                if processed is not None:
+                    _, avail, occ, zone_stats = check_parking_spaces(processed) # fetch de informacion para actualizar/insertar en la base de datos
+                    
+                    records = []
+                    current_time_iso = datetime.now().isoformat()
+                    
+                    for zone_id, stats in zone_stats.items():
+                        records.append({
+                            "zone_id": zone_id,
+                            "available_spaces": stats["available"],
+                            "occupied_spaces": stats["occupied"],
+                            "confidence": stats.get("confidence", 1.0),
+                            "updated_at": current_time_iso
+                        })
+                    
+                    if records:
+                        response = supabase.table('occupancy').upsert(records).execute()
+                        print(f"[{current_time_iso}] Supabase Sync: {len(records)} zones sent.")
+
+        except Exception as e:
+            print(f"[ERROR] Sync worker: {e}")
+
+        time.sleep(15)  # Sincroniza cada 15 segundos
+
 # Load positions and initialize video at startup
 load_positions()
 init_video()
 
+# Start sync thread
+threading.Thread(target=sync_supabase_worker, daemon=True).start()
+
 if __name__ == "__main__":
-    app.run(debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True, use_reloader=False)

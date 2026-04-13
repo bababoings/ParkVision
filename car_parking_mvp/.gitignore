@@ -21,3 +21,6 @@ install_log_utf8.txt
 
 # Jupyter Notebook
 .ipynb_checkpoints/
+
+# Environments variables
+.env

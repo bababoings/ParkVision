@@ -185,3 +185,45 @@ Tendrás que modificar el JavaScript dentro de `templates/space_picker.html` par
 ## 5. Notas Técnicas y Restricciones
 - El sistema utiliza **MJPEG (Motion JPEG)** para el streaming del video. Esto significa que manda imagen por imagen en la ruta `/video_feed`. Esto es algo intensivo para la red pero la mejor forma de integrarlo sin servidores complejos de video.
 - Para evitar que la predicción "parpadee" (cambie rápidamente de verde a rojo entre frames), `main.py` contiene lógica de "Anti-Flickering" comparando contra un umbral de confianza.
+
+---
+
+## 6. Integración con Supabase (Base de Datos en Tiempo Real)
+
+El proyecto incluye sincronización automática de la ocupación en tiempo real con una base de datos PostgreSQL alojada en **Supabase**. Esto permite alimentar páneles (dashboards), aplicaciones móviles o sistemas de terceros sin saturar el servidor de inferencia.
+
+### Dependencias Necesarias
+Para que la conexión funcione, debes instalar los paquetes requeridos usando el `python` explícito de tu entorno virtual. Ojo con este paso, ya que **si usas solo `pip install` podrías instalar los paquetes en una instalación global de Python por error**.
+
+```powershell
+.\venv2\Scripts\python.exe -m pip install supabase python-dotenv
+```
+**Problema común:** Si ves un error tipo `ModuleNotFoundError: No module named 'supabase'`, significa que instalaste las dependencias en otro entorno. Ejecutar el comando con la ruta explícita al `python.exe` local (como se muestra arriba) resuelve el problema.
+> Nota: **Nunca** instales la librería `@supabase/supabase-js` con `npm` para el backend de este proyecto. Aquí usamos Python (`supabase-py`), no Node.js.
+
+### Configuración del Entorno (.env)
+La conexión requiere credenciales sensibles que **nunca deben subirse a GitHub**. En la raíz de tu proyecto, crea un archivo llamado `.env` (éste ya está excluido en el `.gitignore`) con el siguiente formato:
+
+```env
+SUPABASE_URL=https://<TU-PROYECTO>.supabase.co
+SUPABASE_KEY=ey... (TU CLAVE)
+```
+-El "SUPABASE_URL" se encuentra en "Integrations -> Data API". Ahi mismo hay un apartado que dice "API URL".
+-El "SUPABASE_KEY" se encuentra en "Settings -> API Keys". Ahi mismo hay un apartado que dice "Legacy anon, service_role API keys" y dentro de ese apartado hay un apartado que dice "anon" "public".
+**Sobre la Clave (RLS Policies):**
+El script de sincronización realiza operaciones combinadas de inserción y actualización (`upsert`).
+- Si utilizas la clave pública (`anon`), **obligatoriamente** debes configurar las políticas de Row Level Security (RLS) en el panel de Supabase. Deberás permitir políticas `WITH CHECK ( true )` para Insert y Update.
+
+### La Tabla `occupancy`
+La sincronización asume que tienes una tabla llamada `occupancy` con el siguiente esquema:
+- `zone_id` (PK, text): El nombre de la zona, por ejemplo `n1` o `pb`. **IMPORTANTE:** Para que la llave foránea no genere error, la zona debe estar declarada primeramente en tu tabla cruzada de `zones`.
+- `available_spaces` (int4): Espacios vacíos de esa zona.
+- `occupied_spaces` (int4): Cajones ocupados por autos.
+- `confidence` (float8): El porcentaje de disponibilidad.
+- `updated_at` (timestamptz): Fecha y hora del momento del guardado.
+
+### Lógica del Nivel de Confianza (`confidence`)
+En envíos hacia la base de datos, repensamos lo que significa "confianza". En vez de enviar qué tan seguro está el modelo de que un coche es un coche visualmente, rediseñamos la métrica como **"Porcentaje de Disponibilidad"**.
+¿Qué significa esto para el usuario final?
+- Si una zona de 10 cajones tiene 2 libres, la confianza es del **20%** (`0.20`), indicando que es poco probable que encuentre lugar al llegar.
+- Si tiene 8 libres, la confianza sube al **80%** (`0.80`), indicando alta certidumbre de lograr estacionarse.

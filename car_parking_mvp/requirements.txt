@@ -5,3 +5,5 @@ keras
 opencv-python
 opencv-contrib-python
 scikit-learn
+supabase
+python-dotenv
