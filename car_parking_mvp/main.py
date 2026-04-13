@@ -172,32 +172,80 @@ def init_video(video_path=None):
 # =============================================================================
 # Detection Logic
 # =============================================================================
-def crop_quadrilateral(img, points, output_size=(96, 96)):
+EXTRUSION_FACTOR = 0.35  # How much to extend along vanishing vectors (0.0 = no extrusion)
+
+
+def crop_with_volume(img, points, output_size=(96, 96), extrusion_factor=EXTRUSION_FACTOR):
     """
-    Extract image within a quadrilateral using perspective transform.
+    Extract image region that captures both the ground polygon AND the
+    projected vehicle volume above it, without destructive perspective warping.
+
+    Instead of using warpPerspective (which distorts 3D objects into flat
+    pancakes), this function:
+      1. Extends the polygon's "back" points along the parking space's own
+         lateral vanishing vectors to capture the vehicle's roof/body.
+      2. Computes the axis-aligned bounding rectangle of the expanded polygon.
+      3. Extracts the raw pixels and resizes to model input size.
+
+    This approach is camera-angle agnostic: the lateral vectors naturally
+    point toward the camera's vanishing point regardless of mounting position.
+
+    Convention: P1,P2 = back/wall (tope), P3,P4 = exit (salida)
 
     Args:
-        img: Full frame (numpy array)
+        img: Full frame (numpy array, BGR)
         points: List of 4 points [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
-        output_size: Output size (width, height)
+        output_size: Output size (width, height) for the model
+        extrusion_factor: How far to extend along vanishing vectors (0.0-0.5)
 
     Returns:
-        Rectified image of the specified size
+        Resized crop of the specified size, or None on failure
     """
-    src_pts = np.array(points, dtype=np.float32)
-    w, h = output_size
-    dst_pts = np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float32)
+    h_img, w_img = img.shape[:2]
+    pts = np.array(points, dtype=np.float32)
 
-    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-    warped = cv2.warpPerspective(img, M, (w, h))
-    return warped
+    if pts.shape != (4, 2):
+        return None
+
+    p1, p2, p3, p4 = pts[0], pts[1], pts[2], pts[3]
+
+    # Calculate lateral vanishing vectors (from exit toward back/wall)
+    # These vectors naturally point toward the camera's vanishing point
+    v_left = p1 - p4    # Left wall direction: exit(P4) -> back(P1)
+    v_right = p2 - p3   # Right wall direction: exit(P3) -> back(P2)
+
+    # Extend back points along their own vanishing direction
+    p1_ext = p1 + v_left * extrusion_factor
+    p2_ext = p2 + v_right * extrusion_factor
+
+    # Build expanded polygon (original exit + extended back)
+    expanded = np.array([p1_ext, p2_ext, p3, p4], dtype=np.float32)
+
+    # Get axis-aligned bounding rectangle (no warping!)
+    x, y, w, h = cv2.boundingRect(expanded.astype(np.int32))
+
+    # Clip to image boundaries
+    x = max(0, x)
+    y = max(0, y)
+    w = min(w, w_img - x)
+    h = min(h, h_img - y)
+
+    if w <= 0 or h <= 0:
+        return None
+
+    # Extract raw pixels — no perspective distortion!
+    crop = img[y:y+h, x:x+w]
+
+    # Resize to model input size
+    resized = cv2.resize(crop, output_size, interpolation=cv2.INTER_AREA)
+    return resized
 
 
 def check_parking_spaces(img):
     """
     Analyze parking spaces in the given frame.
 
-    Uses perspective transform to extract quadrilateral regions,
+    Uses dynamic volume-aware cropping (no destructive perspective warping)
     then the model to predict occupancy. Applies anti-flicker logic
     based on confidence threshold (VPD-01 Alternative).
 
@@ -220,9 +268,12 @@ def check_parking_spaces(img):
             continue
 
         try:
-            warped = crop_quadrilateral(img, points, input_size)
-            normalized = warped / 255.0
-            img_crops.append(normalized)
+            crop = crop_with_volume(img, points, input_size)
+            if crop is not None:
+                normalized = crop / 255.0
+                img_crops.append(normalized)
+            else:
+                img_crops.append(np.zeros((*input_size, 3)))
         except Exception:
             img_crops.append(np.zeros((*input_size, 3)))
 

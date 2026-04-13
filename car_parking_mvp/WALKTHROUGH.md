@@ -15,6 +15,19 @@ El proyecto funciona bajo un modelo Cliente-Servidor utilizando **Flask** como m
 
 ---
 
+## 2. El Cambio de Paradigma: Adaptación Volumétrica 3D
+
+Históricamente, el sistema de Chando se basaba en un procesamiento puramente bidimensional mediante `warpPerspective`. Sin embargo, las cámaras de seguridad modernas —especialmente en instalaciones como CETYS— proporcionan visiones con una profunda perspectiva tridimensional. Intentar "aplastar" esa realidad 3D a un cuadrado perfecto 2D causaba que los autos se deformaran visualmente, haciendo que el entrenamiento y la detección fallaran en ángulos lejanos o picados.
+
+**La Solución: Adaptación Volumétrica y PKLot**
+Para solucionar esto, implementamos un cambio de paradigma radical:
+- **Adaptación Volumétrica:** En lugar de deformar la imagen de video hacia un cuadrado matemático, ahora deformamos nuestra "caja de selección" para que se adecúe y envuelva de manera natural al objeto real en la foto. Esto nos permite recortar el área del automóvil preservando su volumen y proporciones naturales.
+- **Sinergia con PKLot:** Gracias al script `process_pklot_coco.py`, el modelo pudo ser entrenado con el dataset masivo **PKLot**, el cual contiene miles de ejemplos de estas mismas distorsiones del mundo real. 
+
+Esta combinación —usar algoritmos de transformación bidimensional adaptados inteligentemente para respetar el volumen 3D— ha entregado el mejor rendimiento y entendimiento del problema hasta ahora, eliminando los falsos negativos en zonas críticas como la **Zona A**.
+
+---
+
 ## 2. Guía Completa de Instalación y Puesta en Marcha
 
 Cuando alguien clona este repositorio desde GitHub, **no obtendrá todos los archivos necesarios para ejecutar el proyecto**. Esto es intencional: ciertos archivos son demasiado pesados o son generados localmente en cada máquina, por lo que están excluidos mediante el `.gitignore`. A continuación se explica cada paso para reconstruirlos desde cero.
@@ -73,6 +86,7 @@ pip install -r requirements.txt
 | `opencv-contrib-python` | Módulos extra de OpenCV                                             |
 | `numpy`              | Operaciones numéricas y manejo de arreglos (arrays) de imágenes        |
 | `scikit-learn`       | Utilidades de Machine Learning (métricas, evaluación)                  |
+| `tqdm`               | Barra de progreso visual, usada en la extracción masiva de datos (PKLot)|
 
 > **Nota:** La instalación de TensorFlow puede tardar varios minutos y pesar varios GB. Esto es normal.
 
@@ -157,8 +171,12 @@ Abre tu navegador y visita las siguientes rutas:
 
 ### Inteligencia y Procesamiento Analítico
 - **`preprocessing.py`**: Contiene la función `preprocess_frame`. Antes de que un frame trate de adivinar si hay carros o no, este script valida que el frame tenga buena resolución, brillo adecuado y no esté completamente borroso.
-- **`parking_mobilenetv2.h5`**: El modelo de Red Neuronal profunda. Fue entrenado usando Transfer Learning, diseñado para ser rápido y eficiente tomando pedacitos pequeños de imagen (96x96 pixeles) y devolviendo una predicción.
+- **`parking_mobilenetv2.h5`**: El modelo de Red Neuronal profunda. Fue entrenado usando Transfer Learning, diseñado para ser rápido y eficiente tomando pedacitos pequeños de imagen (96x96 pixeles) y devolviendo una predicción. Lo re-entrenamos usando Decenas de Miles de fotos del dataset externo "PKLot" y activando sus capas medias/altas (Deep Fine-Tuning) para mejor asimilación a cámaras inclinadas.
 - **`carposition.pkl`**: Un pequeño archivo binario. Aquí es donde se guardan temporalmente de forma física todos los rectángulos que dibujaste en el *Space Picker*. Incluye coordenadas `X`, `Y`, Ancho, Alto, y la `Zona` a la que pertenecen.
+
+### Extracción y Procesamiento Masivo de Datos
+- **`process_pklot_coco.py`**: Este script actúa como puente entre el gigantesco dataset **PKLot** (en formato COCO JSON) y nuestra red MobileNetV2. Se encarga de escanear cientos de super-imágenes de estacionamientos, localizar las coordenadas precisas (`x, y, w, h`) de miles de carros en sus respectivas cajones, recortarlos sin deformarlos, redimensionarlos a miniatura 96x96 y depositarlos categorizados en `train_data/`. 
+  - **Instrucción de Uso en caso de quererse:** Si alguna vez quieres cambiar el muestreo o agregar más imágenes de distintos sets COCO para ampliar tu base a 50 mil imágenes, abre una terminal en tu *venv* y simplemente ejecuta `python process_pklot_coco.py`. El script automáticamente balanceará y depositará todo listo para ejecutar de nuevo `train_model.py`.
 
 ### La Interfaz Web (Carpeta `templates/`)
 - **`index.html`**: El Dashboard principal. Es la pantalla donde visualizas el video corriendo en tiempo real y el resumen general.

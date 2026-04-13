@@ -68,6 +68,7 @@ train_datagen = ImageDataGenerator(
     width_shift_range=0.1,
     height_shift_range=0.1,
     brightness_range=[0.8, 1.2],
+    shear_range=0.2,           # Smart Sampling: simulates different camera angles
     fill_mode='nearest'
 )
 
@@ -105,8 +106,13 @@ base_model = MobileNetV2(
     input_shape=(IMG_HEIGHT, IMG_WIDTH, 3)
 )
 
-# Freeze base model layers
-base_model.trainable = False
+# Deep Fine-Tuning: Unfreeze the top layers of the base model
+base_model.trainable = True
+
+# Freeze the early layers (e.g. up to layer 100) to retain general features
+fine_tune_at = 100
+for layer in base_model.layers[:fine_tune_at]:
+    layer.trainable = False
 
 model = Sequential([
     base_model,

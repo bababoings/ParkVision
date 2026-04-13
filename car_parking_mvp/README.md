@@ -10,7 +10,9 @@ Este proyecto ha sido refactorizado significativamente respecto al repositorio o
 
 - **Se reemplazó el archivo principal:** `app.py` se ha convertido en `main.py` con una estructura orientada al MVP.
 - **Se reemplazó el modelo base:** Se reemplazó el modelo original (`model_final.h5`) por uno nuevo basado en Transfer Learning con MobileNetV2 (`parking_mobilenetv2.h5`) para usar pesos de ImageNet y lograr un mejor F1-score.
-- **Se modificó el manejo de regiones (ROIs):** Se modificó la forma estática de delimitar los lugares de estacionamiento. Ahora incluye una herramienta visual interactiva (`SpacePicker` vía web) que permite dibujar regiones directamente en el navegador, agruparlas por "zonas" y se guarda de forma dinámica en `carposition.pkl`.
+- **Se reemplazó el Dataset de Entrenamiento:** Se descartaron las imágenes originales en favor del **Dataset PKLot** (en formato COCO), sumando decenas de miles de imágenes de entornos, climas y ángulos en 3D del mundo real.
+- **Cambio Radical en Procesamiento (Adiós al método de Chando):** En el proyecto original de Chando, el sistema usaba `warpPerspective` para deformar el objeto a un cuadrado 2D (lo que derretía los autos lejanos). **Mi nuevo método** hace el proceso inverso: hace una *adaptación volumétrica* en la que deformamos nuestra caja matemática para que abarque al objeto real en la foto, recortando sin distorsión mantener el volumen 3D del automóvil.
+- **Se modificó el manejo de regiones (ROIs):** Se modificó la forma estática de delimitar los lugares de estacionamiento. Ahora incluye una herramienta visual interactiva (`SpacePicker` vía web) que permite dibujar regiones con *Topes/Salidas* directamente en el navegador.
 - **Se modificó la ingesta de video:** Ya no es obligatorio probar con el único video estático `car_test.mp4`. Ahora puedes **subir dinámicamente** tus propios videos vía una nueva ruta (interfaz web de carga y validación de frames).
 - **Se enriqueció la API:** El endpoint `/space_count` no solo cuenta los disponibles. Ahora devuelve una respuesta JSON detallada con totales, disponibles, ocupados, una marca de tiempo y un **desglose por zonas**.
 

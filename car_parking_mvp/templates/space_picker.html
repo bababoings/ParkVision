@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -19,11 +20,13 @@
             color: var(--accent-blue);
             transition: var(--transition);
         }
+
         .point-progress.active {
             border-color: var(--accent-amber);
             color: var(--accent-amber);
             box-shadow: 0 0 12px rgba(255, 215, 64, 0.2);
         }
+
         .point-dot {
             width: 8px;
             height: 8px;
@@ -31,15 +34,18 @@
             background: var(--border-glass);
             transition: var(--transition);
         }
+
         .point-dot.filled {
             background: var(--accent-amber);
             box-shadow: 0 0 6px rgba(255, 215, 64, 0.5);
         }
+
         .slider-group {
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }
+
         .slider-group input[type="range"] {
             -webkit-appearance: none;
             appearance: none;
@@ -51,6 +57,7 @@
             border: none;
             padding: 0;
         }
+
         .slider-group input[type="range"]::-webkit-slider-thumb {
             -webkit-appearance: none;
             appearance: none;
@@ -61,6 +68,7 @@
             cursor: pointer;
             box-shadow: 0 0 8px rgba(68, 138, 255, 0.4);
         }
+
         .slider-group input[type="range"]::-moz-range-thumb {
             width: 16px;
             height: 16px;
@@ -69,12 +77,14 @@
             cursor: pointer;
             border: none;
         }
+
         .slider-value {
             font-size: 0.8rem;
             color: var(--text-muted);
             min-width: 28px;
             text-align: center;
         }
+
         .btn-warning-custom {
             display: inline-flex;
             align-items: center;
@@ -90,16 +100,19 @@
             transition: var(--transition);
             font-family: 'Inter', sans-serif;
         }
+
         .btn-warning-custom:hover {
             transform: translateY(-2px);
             box-shadow: 0 0 20px rgba(255, 215, 64, 0.3);
         }
+
         .toolbar-separator {
             width: 1px;
             height: 24px;
             background: var(--border-glass);
             margin: 0 0.25rem;
         }
+
         .instructions-banner {
             background: var(--accent-blue-dim);
             border: 1px solid rgba(68, 138, 255, 0.2);
@@ -112,11 +125,13 @@
             align-items: center;
             gap: 0.6rem;
         }
+
         .instructions-banner .icon {
             font-size: 1.2rem;
         }
     </style>
 </head>
+
 <body>
     <div class="app-container">
         <div class="app-header">
@@ -134,7 +149,9 @@
 
         <div class="instructions-banner">
             <span class="icon">💡</span>
-            <span>Haz clic en las <strong>4 esquinas</strong> de cada cajón de estacionamiento. El polígono se cerrará automáticamente al colocar el 4to punto.</span>
+            <span>Primero marca las 2 esquinas del <strong style="color:#ff5252">Tope (T)</strong>, luego las 2 de la
+                <strong style="color:#00e676">Salida (S)</strong>. El sistema capturará el volumen 3D
+                automáticamente.</span>
         </div>
 
         <div class="glass-card" style="margin-bottom: 1.5rem;">
@@ -168,12 +185,16 @@
 
                     <div class="toolbar-separator"></div>
 
-                    <button class="btn-warning-custom" id="btn-cancel-point" title="Cancelar el último punto colocado">↩ Cancelar Punto</button>
-                    <button class="btn-danger-custom" id="btn-undo" title="Eliminar el último cajón completo">🗑 Deshacer Cajón</button>
-                    <button class="btn-danger-custom" id="btn-clear" title="Limpiar todos los cajones">🗑 Limpiar Todo</button>
+                    <button class="btn-warning-custom" id="btn-cancel-point" title="Cancelar el último punto colocado">↩
+                        Cancelar Punto</button>
+                    <button class="btn-danger-custom" id="btn-undo" title="Eliminar el último cajón completo">🗑
+                        Deshacer Cajón</button>
+                    <button class="btn-danger-custom" id="btn-clear" title="Limpiar todos los cajones">🗑 Limpiar
+                        Todo</button>
                     <button class="btn-success-custom" id="btn-save">💾 Guardar Posiciones</button>
 
-                    <span id="space-count-label" style="margin-left: auto; color: var(--text-secondary); font-size: 0.85rem;">
+                    <span id="space-count-label"
+                        style="margin-left: auto; color: var(--text-secondary); font-size: 0.85rem;">
                         Cajones: <strong id="space-count-value">0</strong>
                     </span>
                 </div>
@@ -187,7 +208,8 @@
                 </div>
                 <div id="no-video-msg" style="padding: 3rem; color: var(--text-muted); display: none;">
                     <p style="font-size: 1.2rem;">🎬 No hay video cargado</p>
-                    <p style="margin-top: 0.5rem;">Ve a la página de <a href="/upload" style="color: var(--accent-blue);">subir video</a> primero.</p>
+                    <p style="margin-top: 0.5rem;">Ve a la página de <a href="/upload"
+                            style="color: var(--accent-blue);">subir video</a> primero.</p>
                 </div>
             </div>
         </div>
@@ -428,22 +450,23 @@
                     }
                 }
 
-                // Draw corner points
+                // Draw corner points with T/S labels
                 currentPoints.forEach((pt, i) => {
+                    const isTope = (i < 2);
                     ctx.beginPath();
                     ctx.arc(pt[0], pt[1], pointRadius, 0, Math.PI * 2);
-                    ctx.fillStyle = color;
+                    ctx.fillStyle = isTope ? '#ff5252' : '#00e676';
                     ctx.fill();
                     ctx.strokeStyle = '#ffffff';
                     ctx.lineWidth = 2;
                     ctx.stroke();
 
-                    // Point number
+                    // T/S label
                     ctx.font = `bold ${Math.max(10, pointRadius)}px Inter, sans-serif`;
                     ctx.fillStyle = '#fff';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText(i + 1, pt[0], pt[1]);
+                    ctx.fillText(isTope ? 'T' : 'S', pt[0], pt[1]);
                 });
             }
 
@@ -474,16 +497,39 @@
             ctx.lineWidth = 3;
             ctx.stroke();
 
-            // Corner points
-            points.forEach((pt) => {
+            // Corner points with T/S colors
+            points.forEach((pt, i) => {
+                const isTope = (i < 2);
                 ctx.beginPath();
                 ctx.arc(pt[0], pt[1], pointRadius * 0.7, 0, Math.PI * 2);
-                ctx.fillStyle = color;
+                ctx.fillStyle = isTope ? '#ff5252' : '#00e676';
                 ctx.fill();
                 ctx.strokeStyle = '#fff';
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
             });
+
+            // Draw volume bounding box (shows what MobileNet actually receives)
+            const EXTRUSION = 0.35;
+            const p1 = points[0], p2 = points[1], p3 = points[2], p4 = points[3];
+            // Vanishing vectors
+            const vL = [p1[0] - p4[0], p1[1] - p4[1]];
+            const vR = [p2[0] - p3[0], p2[1] - p3[1]];
+            // Extended back points
+            const p1e = [p1[0] + vL[0] * EXTRUSION, p1[1] + vL[1] * EXTRUSION];
+            const p2e = [p2[0] + vR[0] * EXTRUSION, p2[1] + vR[1] * EXTRUSION];
+            // Bounding rect of expanded polygon
+            const allX = [p1e[0], p2e[0], p3[0], p4[0]];
+            const allY = [p1e[1], p2e[1], p3[1], p4[1]];
+            const bx = Math.min(...allX);
+            const by = Math.min(...allY);
+            const bw = Math.max(...allX) - bx;
+            const bh = Math.max(...allY) - by;
+            ctx.strokeStyle = '#ffd740';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([6, 3]);
+            ctx.strokeRect(bx, by, bw, bh);
+            ctx.setLineDash([]);
 
             // Label at centroid
             const cx = points.reduce((s, p) => s + p[0], 0) / 4;
@@ -577,7 +623,7 @@
                         showAlert(`📋 Se cargaron ${positions.length} cajones existentes.`, 'info');
                     }
                 })
-                .catch(() => {});
+                .catch(() => { });
         }
 
         // Cancel last point (while placing)
@@ -626,15 +672,15 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ positions: positions })
             })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    showAlert(`✅ ${positions.length} cajones guardados correctamente.`, 'success');
-                } else {
-                    showAlert('❌ ' + (data.error || 'Error al guardar'), 'error');
-                }
-            })
-            .catch(() => showAlert('❌ Error de conexión.', 'error'));
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showAlert(`✅ ${positions.length} cajones guardados correctamente.`, 'success');
+                    } else {
+                        showAlert('❌ ' + (data.error || 'Error al guardar'), 'error');
+                    }
+                })
+                .catch(() => showAlert('❌ Error de conexión.', 'error'));
         });
 
         // Keyboard shortcut: Escape cancels current point
@@ -667,4 +713,5 @@
         });
     </script>
 </body>
+
 </html>
