@@ -196,7 +196,7 @@ El proyecto incluye sincronización automática de la ocupación en tiempo real 
 Para que la conexión funcione, debes instalar los paquetes requeridos usando el `python` explícito de tu entorno virtual. Ojo con este paso, ya que **si usas solo `pip install` podrías instalar los paquetes en una instalación global de Python por error**.
 
 ```powershell
-.\venv2\Scripts\python.exe -m pip install supabase python-dotenv
+.\venv\Scripts\python.exe -m pip install supabase python-dotenv
 ```
 **Problema común:** Si ves un error tipo `ModuleNotFoundError: No module named 'supabase'`, significa que instalaste las dependencias en otro entorno. Ejecutar el comando con la ruta explícita al `python.exe` local (como se muestra arriba) resuelve el problema.
 > Nota: **Nunca** instales la librería `@supabase/supabase-js` con `npm` para el backend de este proyecto. Aquí usamos Python (`supabase-py`), no Node.js.
