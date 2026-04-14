@@ -24,3 +24,6 @@ install_log_utf8.txt
 
 # Environments variables
 .env
+
+#Metrics graphics
+metrics_output/

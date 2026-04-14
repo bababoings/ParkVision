@@ -201,6 +201,41 @@ except ImportError:
     print("[WARNING] scikit-learn not installed. Cannot calculate F1-score.")
     print("Install with: pip install scikit-learn")
 
+# =============================================================================
+# Plotting Training History
+# =============================================================================
+try:
+    import matplotlib.pyplot as plt
+    os.makedirs('metrics_output', exist_ok=True)
+    
+    plt.figure(figsize=(12, 5))
+    
+    # Accuracy Plot
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['accuracy'], label='Train Accuracy', color='blue')
+    plt.plot(history.history['val_accuracy'], label='Val Accuracy', color='orange')
+    plt.title('Model Accuracy over Epochs')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True)
+    
+    # Loss Plot
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['loss'], label='Train Loss', color='blue')
+    plt.plot(history.history['val_loss'], label='Val Loss', color='orange')
+    plt.title('Model Loss over Epochs')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig('metrics_output/training_history.png', dpi=300)
+    print("\n[+] Gráfica de entrenamiento guardada en: metrics_output/training_history.png")
+except ImportError:
+    print("\n[WARNING] matplotlib no está instalado. No se puede generar gráfica.")
+
 # Final summary
 print()
 print("=" * 60)
