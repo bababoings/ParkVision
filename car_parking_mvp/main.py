@@ -146,27 +146,46 @@ def load_positions():
         app_state["zones"] = {}
 
 
-def init_video(video_path=None):
-    """Initialize or reinitialize the video capture."""
+def init_video(video_source=None):
+    """Initialize or reinitialize the video capture (supports webcam & files)."""
     with app_state["cap_lock"]:
         if app_state["cap"] is not None:
             app_state["cap"].release()
 
-        if video_path and os.path.exists(video_path):
-            app_state["video_path"] = video_path
-            app_state["cap"] = cv2.VideoCapture(video_path)
-            print(f"[INFO] Video loaded: {video_path}")
+        # If it's a specific local path (for testing or uploaded videos)
+        if video_source is not None and isinstance(video_source, str) and os.path.exists(video_source):
+            app_state["video_path"] = video_source
+            app_state["cap"] = cv2.VideoCapture(video_source)
+            print(f"[INFO] Video loaded: {video_source}")
         else:
-            # Try default video
-            default_video = os.path.join(os.path.dirname(__file__), 'car_test.mp4')
-            if os.path.exists(default_video):
-                app_state["video_path"] = default_video
-                app_state["cap"] = cv2.VideoCapture(default_video)
-                print(f"[INFO] Default video loaded: {default_video}")
-            else:
-                app_state["video_path"] = None
-                app_state["cap"] = None
-                print("[WARNING] No video file available.")
+            # Switch to Webcam (C920 MVP Paradigm)
+            camera_index = 0
+            if video_source is not None and isinstance(video_source, int):
+                camera_index = video_source
+            elif video_source is not None and str(video_source).isdigit():
+                camera_index = int(video_source)
+
+            app_state["video_path"] = f"Webcam {camera_index}"
+            # Use CAP_DSHOW for better webcam initialization on Windows
+            cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+
+            # C920 Settings: Full HD (1080p @ 30fps)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+
+            if not cap.isOpened():
+                print(f"[WARNING] Could not open webcam index {camera_index}. Trying default mp4...")
+                default_video = os.path.join(os.path.dirname(__file__), 'car_test.mp4')
+                if os.path.exists(default_video):
+                    cap = cv2.VideoCapture(default_video)
+                    app_state["video_path"] = default_video
+                else:
+                    cap = None
+                    app_state["video_path"] = None
+
+            app_state["cap"] = cap
+            print(f"[INFO] Initialized capture source: {app_state['video_path']}")
 
 
 # =============================================================================
@@ -370,10 +389,13 @@ def generate_frames():
 
             success, img = cap.read()
 
-            # Loop video when finished
+            # Loop video when finished (only if playing a file, not webcam)
             if not success:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                success, img = cap.read()
+                is_file = str(app_state.get("video_path", "")).endswith(('.mp4', '.avi', '.mkv', '.mov'))
+                if is_file:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    success, img = cap.read()
+                
                 if not success:
                     break
 
@@ -437,8 +459,10 @@ def space_count():
 
         success, img = cap.read()
         if not success:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            success, img = cap.read()
+            is_file = str(app_state.get("video_path", "")).endswith(('.mp4', '.avi', '.mkv', '.mov'))
+            if is_file:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                success, img = cap.read()
 
     if success:
         processed, _, _ = preprocess_frame(img)
@@ -591,8 +615,10 @@ def sync_supabase_worker():
 
                 success, img = cap.read()
                 if not success:
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    success, img = cap.read()
+                    is_file = str(app_state.get("video_path", "")).endswith(('.mp4', '.avi', '.mkv', '.mov'))
+                    if is_file:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        success, img = cap.read()
             
             if success:
                 processed, _, _ = preprocess_frame(img)
