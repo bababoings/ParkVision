@@ -21,6 +21,13 @@
             <a href="/" class="nav-btn active">Dashboard</a>
             <a href="/upload" class="nav-btn">Subir Video</a>
             <a href="/space_picker" class="nav-btn">Delimitar Espacios</a>
+            <div style="flex-grow: 1;"></div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; padding-right: 1rem;">
+                <label for="global-layout-select" style="color: var(--text-secondary); font-size: 0.9rem;">Layout:</label>
+                <select id="global-layout-select" style="padding: 0.4rem; border-radius: 4px; border: 1px solid var(--border-glass); background: var(--bg-secondary); color: white; outline: none; min-width: 120px;">
+                    <option value="default">default</option>
+                </select>
+            </div>
         </div>
 
         <div class="timestamp" id="timestamp">Última actualización: —</div>
@@ -112,9 +119,11 @@
                                     </div>
                                     <div class="zone-stat">
                                         <div class="zone-stat-value" style="color: var(--accent-green);">${z.available}</div>
+                                        <div class="zone-stat-label">Disponibles</div>
                                     </div>
                                     <div class="zone-stat">
                                         <div class="zone-stat-value" style="color: var(--accent-red);">${z.occupied}</div>
+                                        <div class="zone-stat-label">Ocupados</div>
                                     </div>
                                 </div>
                             </div>
@@ -129,6 +138,36 @@
         // Initial load + periodic update
         updateSpaceCount();
         setInterval(updateSpaceCount, 2000);
+
+        // Layouts logic
+        const globalLayoutSelect = document.getElementById('global-layout-select');
+
+        function fetchLayouts() {
+            fetch('/api/layouts')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.layouts) {
+                        const active = data.active_layout || 'default';
+                        globalLayoutSelect.innerHTML = data.layouts.map(l => 
+                            `<option value="${l}" ${l === active ? 'selected' : ''}>${l}</option>`
+                        ).join('');
+                    }
+                })
+                .catch(console.error);
+        }
+
+        globalLayoutSelect.addEventListener('change', (e) => {
+            const newLayout = e.target.value;
+            fetch('/api/layouts/active', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ layout: newLayout })
+            }).then(() => {
+                updateSpaceCount(); // Refresh stats immediately
+            });
+        });
+
+        fetchLayouts();
     </script>
 </body>
 

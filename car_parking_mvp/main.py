@@ -55,10 +55,13 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB max upload
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 POSITIONS_FILE = os.path.join(os.path.dirname(__file__), 'carposition.pkl')
+LAYOUTS_DIR = os.path.join(os.path.dirname(__file__), 'layouts')
+ACTIVE_LAYOUT_FILE = os.path.join(os.path.dirname(__file__), 'active_layout.txt')
 MODEL_FILE = os.path.join(os.path.dirname(__file__), 'parking_mobilenetv2.h5')
 MODEL_FALLBACK = os.path.join(os.path.dirname(__file__), 'model_final.h5')
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(LAYOUTS_DIR, exist_ok=True)
 
 # =============================================================================
 # Global Application State
@@ -67,6 +70,7 @@ app_state = {
     "video_path": None,
     "cap": None,
     "cap_lock": threading.Lock(),
+    "active_layout": "default",
     "positions": [],          # List of {points: [[x1,y1],...,[x4,y4]], zone}
     "zones": {},              # {"Zona A": [indices...]}
     "model": None,
@@ -104,46 +108,72 @@ def load_model_lazy():
     return app_state["model"]
 
 
-def load_positions():
-    """Load positions from pickle file. Expects new format: {points, zone}."""
-    if not os.path.exists(POSITIONS_FILE):
-        app_state["positions"] = []
-        app_state["zones"] = {}
-        return
-
-    try:
-        with open(POSITIONS_FILE, 'rb') as f:
-            data = pickle.load(f)
-
-        if isinstance(data, list) and len(data) > 0:
-            if isinstance(data[0], dict) and 'points' in data[0]:
-                # New format: {points: [[x1,y1],...,[x4,y4]], zone}
-                app_state["positions"] = data
+def load_positions(layout_name=None):
+    """Load positions from Supabase or local fallback."""
+    if layout_name is None:
+        try:
+            if os.path.exists(ACTIVE_LAYOUT_FILE):
+                with open(ACTIVE_LAYOUT_FILE, "r") as f:
+                    app_state["active_layout"] = f.read().strip()
             else:
-                print("[WARNING] Old format detected in .pkl. Ignoring. "
-                      "Please re-define spaces using the SpacePicker.")
-                app_state["positions"] = []
-        else:
-            app_state["positions"] = []
+                app_state["active_layout"] = "default"
+        except Exception:
+            app_state["active_layout"] = "default"
+        layout_name = app_state["active_layout"]
+    else:
+        app_state["active_layout"] = layout_name
+        try:
+            with open(ACTIVE_LAYOUT_FILE, "w") as f:
+                f.write(layout_name)
+        except Exception:
+            pass
 
-        # Build zone index
-        zones = {}
-        for i, pos in enumerate(app_state["positions"]):
-            zone_name = pos.get("zone", "Zona A")
-            if zone_name not in zones:
-                zones[zone_name] = []
-            zones[zone_name].append(i)
-        app_state["zones"] = zones
+    positions_data = []
+    loaded_from_db = False
 
-        # Initialize previous states
-        app_state["previous_states"] = [None] * len(app_state["positions"])
+    if supabase:
+        try:
+            res = supabase.table('parking_layouts').select('positions').eq('name', layout_name).execute()
+            if res.data and len(res.data) > 0:
+                positions_data = res.data[0]['positions']
+                loaded_from_db = True
+                print(f"[INFO] Loaded layout '{layout_name}' from Supabase.")
+            else:
+                print(f"[INFO] Layout '{layout_name}' not found in Supabase.")
+        except Exception as e:
+            print(f"[ERROR] Failed to load layout from Supabase: {e}")
 
-        print(f"[INFO] Loaded {len(app_state['positions'])} positions in "
-              f"{len(app_state['zones'])} zones")
-    except Exception as e:
-        print(f"[ERROR] Failed to load positions: {e}")
-        app_state["positions"] = []
-        app_state["zones"] = {}
+    if not loaded_from_db:
+        # Fallback to local pkl
+        pkl_path = os.path.join(LAYOUTS_DIR, f"{layout_name}.pkl")
+        if not os.path.exists(pkl_path) and layout_name == "default":
+            pkl_path = POSITIONS_FILE
+            
+        if os.path.exists(pkl_path):
+            try:
+                with open(pkl_path, 'rb') as f:
+                    data = pickle.load(f)
+                if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+                    positions_data = data
+                print(f"[INFO] Loaded layout '{layout_name}' from local file.")
+            except Exception as e:
+                print(f"[ERROR] Failed to load local file: {e}")
+
+    app_state["positions"] = positions_data if isinstance(positions_data, list) else []
+
+    # Build zone index
+    zones = {}
+    for i, pos in enumerate(app_state["positions"]):
+        zone_name = pos.get("zone", "Zona A")
+        if zone_name not in zones:
+            zones[zone_name] = []
+        zones[zone_name].append(i)
+    app_state["zones"] = zones
+
+    # Initialize previous states
+    app_state["previous_states"] = [None] * len(app_state["positions"])
+
+    print(f"[INFO] Active config '{layout_name}' has {len(app_state['positions'])} positions in {len(app_state['zones'])} zones")
 
 
 def init_video(video_source=None):
@@ -191,69 +221,37 @@ def init_video(video_source=None):
 # =============================================================================
 # Detection Logic
 # =============================================================================
-EXTRUSION_FACTOR = 0.35  # How much to extend along vanishing vectors (0.0 = no extrusion)
 
-
-def crop_with_volume(img, points, output_size=(96, 96), extrusion_factor=EXTRUSION_FACTOR):
+def crop_with_volume(img, points, output_size=(96, 96)):
     """
-    Extract image region that captures both the ground polygon AND the
-    projected vehicle volume above it, without destructive perspective warping.
-
-    Instead of using warpPerspective (which distorts 3D objects into flat
-    pancakes), this function:
-      1. Extends the polygon's "back" points along the parking space's own
-         lateral vanishing vectors to capture the vehicle's roof/body.
-      2. Computes the axis-aligned bounding rectangle of the expanded polygon.
-      3. Extracts the raw pixels and resizes to model input size.
-
-    This approach is camera-angle agnostic: the lateral vectors naturally
-    point toward the camera's vanishing point regardless of mounting position.
-
-    Convention: P1,P2 = back/wall (tope), P3,P4 = exit (salida)
-
-    Args:
-        img: Full frame (numpy array, BGR)
-        points: List of 4 points [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
-        output_size: Output size (width, height) for the model
-        extrusion_factor: How far to extend along vanishing vectors (0.0-0.5)
-
-    Returns:
-        Resized crop of the specified size, or None on failure
+    Extract image region using the axis-aligned bounding box of the polygon,
+    extended upwards to capture the 3D volume (roof) of the vehicle.
     """
     h_img, w_img = img.shape[:2]
-    pts = np.array(points, dtype=np.float32)
+    pts = np.array(points, dtype=np.int32)
 
     if pts.shape != (4, 2):
         return None
 
-    p1, p2, p3, p4 = pts[0], pts[1], pts[2], pts[3]
+    # Get axis-aligned bounding rectangle of the 4 ground points
+    x, y, w, h = cv2.boundingRect(pts)
 
-    # Calculate lateral vanishing vectors (from exit toward back/wall)
-    # These vectors naturally point toward the camera's vanishing point
-    v_left = p1 - p4    # Left wall direction: exit(P4) -> back(P1)
-    v_right = p2 - p3   # Right wall direction: exit(P3) -> back(P2)
+    # Expand bounding box upwards for car height (25% of height)
+    # Expand slightly left/right/down (5%) to prevent tight clipping
+    pad_up = int(h * 0.25)
+    pad_side = int(w * 0.05)
+    pad_down = int(h * 0.05)
 
-    # Extend back points along their own vanishing direction
-    p1_ext = p1 + v_left * extrusion_factor
-    p2_ext = p2 + v_right * extrusion_factor
+    new_y = max(0, y - pad_up)
+    new_x = max(0, x - pad_side)
+    new_h = min(h_img - new_y, h + pad_up + pad_down)
+    new_w = min(w_img - new_x, w + pad_side * 2)
 
-    # Build expanded polygon (original exit + extended back)
-    expanded = np.array([p1_ext, p2_ext, p3, p4], dtype=np.float32)
-
-    # Get axis-aligned bounding rectangle (no warping!)
-    x, y, w, h = cv2.boundingRect(expanded.astype(np.int32))
-
-    # Clip to image boundaries
-    x = max(0, x)
-    y = max(0, y)
-    w = min(w, w_img - x)
-    h = min(h, h_img - y)
-
-    if w <= 0 or h <= 0:
+    if new_w <= 0 or new_h <= 0:
         return None
 
     # Extract raw pixels — no perspective distortion!
-    crop = img[y:y+h, x:x+w]
+    crop = img[new_y:new_y+new_h, new_x:new_x+new_w]
 
     # Resize to model input size
     resized = cv2.resize(crop, output_size, interpolation=cv2.INTER_AREA)
@@ -343,21 +341,21 @@ def check_parking_spaces(img):
         cv2.fillPoly(overlay, [pts_np], color)
         cv2.addWeighted(overlay, 0.15, img, 0.85, 0, img)
 
-        # Draw label at centroid
-        cx = int(np.mean(pts_np[:, 0]))
-        cy = int(np.mean(pts_np[:, 1]))
-        display_text = f"{label} ({confidence:.0%})"
-        font_scale = 0.45
-        text_thickness = 1
-        text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX,
-                                    font_scale, text_thickness)[0]
-        text_x = cx - text_size[0] // 2
-        text_y = cy + text_size[1] // 2
-        cv2.rectangle(img, (text_x - 3, text_y - text_size[1] - 5),
-                      (text_x + text_size[0] + 3, text_y + 2), color, -1)
-        cv2.putText(img, display_text, (text_x, text_y - 3),
-                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_color,
-                    text_thickness)
+        # Draw label at centroid commented out to prevent stacking/visual clutter
+        # cx = int(np.mean(pts_np[:, 0]))
+        # cy = int(np.mean(pts_np[:, 1]))
+        # display_text = f"{label} ({confidence:.0%})"
+        # font_scale = 0.45
+        # text_thickness = 1
+        # text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX,
+        #                             font_scale, text_thickness)[0]
+        # text_x = cx - text_size[0] // 2
+        # text_y = cy + text_size[1] // 2
+        # cv2.rectangle(img, (text_x - 3, text_y - text_size[1] - 5),
+        #               (text_x + text_size[0] + 3, text_y + 2), color, -1)
+        # cv2.putText(img, display_text, (text_x, text_y - 3),
+        #             cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_color,
+        #             text_thickness)
 
         # Zone aggregation (ZAM-01)
         if zone not in zone_stats:
@@ -557,12 +555,16 @@ def first_frame():
 
 @app.route('/save_positions', methods=['POST'])
 def save_positions():
-    """Guarda las posiciones definidas desde el SpacePicker (formato 4 puntos)."""
+    """Guarda las posiciones definidas desde el SpacePicker en Supabase (o local)."""
     data = request.get_json()
     if not data or 'positions' not in data:
         return jsonify(error="No se recibieron posiciones"), 400
 
     positions = data['positions']
+    layout_name = data.get('layout_name', app_state.get('active_layout', 'default'))
+
+    if not layout_name.strip():
+        layout_name = "default"
 
     # Validate: each position must have 'points' (4 items of [x,y]) and 'zone'
     for i, p in enumerate(positions):
@@ -574,15 +576,33 @@ def save_positions():
             if not isinstance(pt, list) or len(pt) != 2:
                 return jsonify(error=f"Cajón {i+1}, punto {j+1}: formato inválido"), 400
 
-    # Save to pickle
+    # Save to Supabase
+    saved_to_db = False
+    if supabase:
+        try:
+            supabase.table('parking_layouts').upsert({
+                "name": layout_name,
+                "positions": positions
+            }, on_conflict="name").execute()
+            saved_to_db = True
+        except Exception as e:
+            print(f"[ERROR] Failed to save layout '{layout_name}' to Supabase: {e}")
+
+    # Fallback/Mirror to local backup
     try:
-        with open(POSITIONS_FILE, 'wb') as f:
+        if layout_name == "default":
+            pkl_path = POSITIONS_FILE
+        else:
+            pkl_path = os.path.join(LAYOUTS_DIR, f"{layout_name}.pkl")
+        with open(pkl_path, 'wb') as f:
             pickle.dump(positions, f)
     except Exception as e:
-        return jsonify(error=f"Error al guardar: {str(e)}"), 500
+        if not saved_to_db:
+            return jsonify(error=f"Error al guardar base local: {str(e)}"), 500
 
-    # Update app state
-    load_positions()
+    # Update app state if saving to active layout
+    if layout_name == app_state.get('active_layout', 'default'):
+        load_positions(layout_name)
 
     return jsonify(success=True, count=len(positions))
 
@@ -591,6 +611,82 @@ def save_positions():
 def load_positions_route():
     """Carga las posiciones existentes como JSON."""
     return jsonify(positions=app_state["positions"])
+
+
+@app.route('/api/layouts', methods=['GET'])
+def get_layouts():
+    """Retorna la lista de layouts disponibles."""
+    layouts = []
+    
+    if supabase:
+        try:
+            res = supabase.table('parking_layouts').select('name').execute()
+            if res.data:
+                layouts.extend([item['name'] for item in res.data])
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch layouts from Supabase: {e}")
+            
+    local_files = []
+    if os.path.exists(POSITIONS_FILE):
+        local_files.append('default')
+        
+    if os.path.exists(LAYOUTS_DIR):
+        for f in os.listdir(LAYOUTS_DIR):
+            if f.endswith('.pkl'):
+                name = f[:-4]
+                if name != 'default' or 'default' not in local_files:
+                    local_files.append(name)
+                
+    layouts.extend([l for l in local_files if l not in layouts])
+    if not layouts:
+        layouts = ['default']
+        
+    return jsonify({
+        "layouts": list(set(layouts)),
+        "active_layout": app_state.get("active_layout", "default")
+    })
+
+@app.route('/api/layouts/active', methods=['POST'])
+def set_active_layout():
+    """Cambia el layout activo."""
+    data = request.get_json()
+    new_layout = data.get('layout')
+    if not new_layout:
+        return jsonify(error="Nombre de layout vacío"), 400
+        
+    load_positions(new_layout)
+    return jsonify(success=True, active_layout=app_state["active_layout"])
+
+@app.route('/api/layouts/<layout_name>', methods=['GET'])
+def get_layout(layout_name):
+    """Obtiene las posiciones de un layout específico sin volverlo activo."""
+    positions_data = []
+    loaded = False
+    
+    if supabase:
+        try:
+            res = supabase.table('parking_layouts').select('positions').eq('name', layout_name).execute()
+            if res.data and len(res.data) > 0:
+                positions_data = res.data[0]['positions']
+                loaded = True
+        except Exception as e:
+            pass
+            
+    if not loaded:
+        pkl_path = os.path.join(LAYOUTS_DIR, f"{layout_name}.pkl")
+        if not os.path.exists(pkl_path) and layout_name == "default":
+            pkl_path = POSITIONS_FILE
+            
+        if os.path.exists(pkl_path):
+            try:
+                with open(pkl_path, 'rb') as f:
+                    data = pickle.load(f)
+                if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+                    positions_data = data
+            except:
+                pass
+                
+    return jsonify(positions=positions_data)
 
 
 # =============================================================================

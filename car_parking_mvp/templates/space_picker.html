@@ -157,6 +157,15 @@
         <div class="glass-card" style="margin-bottom: 1.5rem;">
             <div class="card-body">
                 <div class="picker-toolbar">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label for="layout-select" style="color: var(--accent-amber); font-weight: 600;">Layout:</label>
+                        <select id="layout-select" style="padding: 0.3rem; border-radius: 4px; border: 1px solid var(--border-glass); background: var(--bg-secondary); color: white; min-width: 100px;">
+                            <option value="default">default</option>
+                        </select>
+                    </div>
+
+                    <div class="toolbar-separator"></div>
+
                     <label for="zone-select">Zona:</label>
                     <select id="zone-select">
                         <option value="Zona A">Zona A</option>
@@ -191,7 +200,8 @@
                         Deshacer Cajón</button>
                     <button class="btn-danger-custom" id="btn-clear" title="Limpiar todos los cajones">🗑 Limpiar
                         Todo</button>
-                    <button class="btn-success-custom" id="btn-save">💾 Guardar Posiciones</button>
+                    <button class="btn-success-custom" id="btn-save">💾 Guardar</button>
+                    <button class="btn-success-custom" id="btn-save-as" style="background: linear-gradient(135deg, #00e676, #00b0ff); padding: 0.7rem 1.2rem;">💾 Nuevo...</button>
 
                     <span id="space-count-label"
                         style="margin-left: auto; color: var(--text-secondary); font-size: 0.85rem;">
@@ -263,6 +273,7 @@
         const pointSizeValue = document.getElementById('point-size-value');
         const pointProgressText = document.getElementById('point-progress-text');
         const pointProgress = document.getElementById('point-progress');
+        const layoutSelect = document.getElementById('layout-select');
 
         const ZONE_COLORS = {
             'Zona A': '#448aff',
@@ -280,6 +291,7 @@
         let mousePos = null;      // Current mouse position for preview line
         let scaleX = 1, scaleY = 1;
         let pointRadius = 8;      // Controlled by slider
+        let currentLayout = 'default';
 
         // =====================================================================
         // Load background image (first frame of video)
@@ -300,7 +312,7 @@
             scaleY = canvas.height / canvas.offsetHeight;
 
             redraw();
-            loadExistingPositions();
+            fetchLayouts();
         };
         img.onerror = () => {
             canvas.style.display = 'none';
@@ -510,25 +522,26 @@
             });
 
             // Draw volume bounding box (shows what MobileNet actually receives)
-            const EXTRUSION = 0.35;
-            const p1 = points[0], p2 = points[1], p3 = points[2], p4 = points[3];
-            // Vanishing vectors
-            const vL = [p1[0] - p4[0], p1[1] - p4[1]];
-            const vR = [p2[0] - p3[0], p2[1] - p3[1]];
-            // Extended back points
-            const p1e = [p1[0] + vL[0] * EXTRUSION, p1[1] + vL[1] * EXTRUSION];
-            const p2e = [p2[0] + vR[0] * EXTRUSION, p2[1] + vR[1] * EXTRUSION];
-            // Bounding rect of expanded polygon
-            const allX = [p1e[0], p2e[0], p3[0], p4[0]];
-            const allY = [p1e[1], p2e[1], p3[1], p4[1]];
+            const allX = points.map(p => p[0]);
+            const allY = points.map(p => p[1]);
             const bx = Math.min(...allX);
             const by = Math.min(...allY);
             const bw = Math.max(...allX) - bx;
             const bh = Math.max(...allY) - by;
+            
+            const padUp = bh * 0.25;
+            const padSide = bw * 0.05;
+            const padDown = bh * 0.05;
+            
+            const fX = bx - padSide;
+            const fY = by - padUp;
+            const fW = bw + padSide * 2;
+            const fH = bh + padUp + padDown;
+
             ctx.strokeStyle = '#ffd740';
             ctx.lineWidth = 1;
             ctx.setLineDash([6, 3]);
-            ctx.strokeRect(bx, by, bw, bh);
+            ctx.strokeRect(fX, fY, fW, fH);
             ctx.setLineDash([]);
 
             // Label at centroid
@@ -610,17 +623,48 @@
         }
 
         // =====================================================================
-        // Load / Save
+        // Load / Save (Layouts)
         // =====================================================================
+        function fetchLayouts() {
+            fetch('/api/layouts')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.layouts) {
+                        currentLayout = data.active_layout || 'default';
+                        layoutSelect.innerHTML = data.layouts.map(l => 
+                            `<option value="${l}" ${l === currentLayout ? 'selected' : ''}>${l}</option>`
+                        ).join('');
+                        loadExistingPositions();
+                    }
+                })
+                .catch(console.error);
+        }
+
+        layoutSelect.addEventListener('change', (e) => {
+            const newLayout = e.target.value;
+            fetch('/api/layouts/active', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ layout: newLayout })
+            }).then(() => {
+                currentLayout = newLayout;
+                currentPoints = [];
+                updatePointProgress();
+                loadExistingPositions();
+            });
+        });
+
         function loadExistingPositions() {
             fetch('/load_positions')
                 .then(r => r.json())
                 .then(data => {
-                    if (data.positions && data.positions.length > 0) {
+                    if (data.positions) {
                         positions = data.positions;
                         redraw();
                         updatePositionsTable();
-                        showAlert(`📋 Se cargaron ${positions.length} cajones existentes.`, 'info');
+                        if(positions.length > 0) {
+                            showAlert(`📋 Se cargaron ${positions.length} cajones del layout '${currentLayout}'.`, 'info');
+                        }
                     }
                 })
                 .catch(() => { });
@@ -656,9 +700,8 @@
         });
 
         // Save
-        document.getElementById('btn-save').addEventListener('click', () => {
-            if (positions.length === 0) {
-                showAlert('⚠ No hay cajones para guardar.', 'error');
+        function saveLayout(layoutName) {
+            if (positions.length === 0 && !confirm('¿Guardar layout vacío?')) {
                 return;
             }
 
@@ -670,17 +713,29 @@
             fetch('/save_positions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ positions: positions })
+                body: JSON.stringify({ positions: positions, layout_name: layoutName })
             })
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) {
-                        showAlert(`✅ ${positions.length} cajones guardados correctamente.`, 'success');
+                        showAlert(`✅ ${positions.length} cajones guardados en '${layoutName}'.`, 'success');
+                        fetchLayouts(); // Refresh dropdown
                     } else {
                         showAlert('❌ ' + (data.error || 'Error al guardar'), 'error');
                     }
                 })
                 .catch(() => showAlert('❌ Error de conexión.', 'error'));
+        }
+
+        document.getElementById('btn-save').addEventListener('click', () => {
+            saveLayout(currentLayout);
+        });
+
+        document.getElementById('btn-save-as').addEventListener('click', () => {
+            const newName = prompt('Ingresa el nombre para el nuevo layout:');
+            if (newName && newName.trim() !== '') {
+                saveLayout(newName.trim());
+            }
         });
 
         // Keyboard shortcut: Escape cancels current point

@@ -78,13 +78,13 @@ def checkingCarParking(img):
         font_scale = 0.5
         text_thickness = 1
 
-        textSize = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_thickness)[0]
-        textX = cx - textSize[0] // 2
-        textY = cy + textSize[1] // 2
-        cv2.rectangle(img, (textX - 3, textY - textSize[1] - 5),
-                      (textX + textSize[0] + 3, textY + 2), color, -1)
-        cv2.putText(img, label, (textX, textY - 3),
-                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, textColor, text_thickness)
+        # textSize = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_thickness)[0]
+        # textX = cx - textSize[0] // 2
+        # textY = cy + textSize[1] // 2
+        # cv2.rectangle(img, (textX - 3, textY - textSize[1] - 5),
+        #               (textX + textSize[0] + 3, textY + 2), color, -1)
+        # cv2.putText(img, label, (textX, textY - 3),
+        #             cv2.FONT_HERSHEY_SIMPLEX, font_scale, textColor, text_thickness)
 
     cv2.putText(img, f'Space Count: {spaceCounter}', (100, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
