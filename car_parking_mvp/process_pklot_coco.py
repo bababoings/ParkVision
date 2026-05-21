@@ -82,23 +82,24 @@ def process_coco_subset(split_name, json_path, img_dir, output_base, limit_per_c
                 count += 1
 
 if __name__ == '__main__':
-    PKLOT_BASE = r"D:\Pklot_dataset"
-    OUTPUT_TRAIN = r"train_data\train"
-    OUTPUT_VAL = r"train_data\test"
-    
+    here = os.path.dirname(os.path.abspath(__file__))
+    PKLOT_BASE = os.environ.get("PKLOT_BASE", os.path.join(here, "Pklot_dataset"))
+    OUTPUT_TRAIN = os.path.join(here, "train_data", "train")
+    OUTPUT_VAL = os.path.join(here, "train_data", "test")
+
     # Process Train (10k per class)
     process_coco_subset(
         'train',
-        os.path.join(PKLOT_BASE, r"train\_annotations.coco.json"),
+        os.path.join(PKLOT_BASE, "train", "_annotations.coco.json"),
         os.path.join(PKLOT_BASE, "train"),
         OUTPUT_TRAIN,
         limit_per_class=10000
     )
-    
+
     # Process Valid (2k per class)
     process_coco_subset(
         'valid',
-        os.path.join(PKLOT_BASE, r"valid\_annotations.coco.json"),
+        os.path.join(PKLOT_BASE, "valid", "_annotations.coco.json"),
         os.path.join(PKLOT_BASE, "valid"),
         OUTPUT_VAL,
         limit_per_class=2000

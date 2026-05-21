@@ -175,6 +175,9 @@ def load_positions(layout_name=None):
 
     print(f"[INFO] Active config '{layout_name}' has {len(app_state['positions'])} positions in {len(app_state['zones'])} zones")
 
+    # Reconcile per-space rows in DB so the sync worker has rows to update.
+    _sync_spaces_to_db(app_state["positions"], layout_name, replace=False)
+
 
 def init_video(video_source=None):
     """Initialize or reinitialize the video capture (supports webcam & files)."""
@@ -216,6 +219,51 @@ def init_video(video_source=None):
 
             app_state["cap"] = cap
             print(f"[INFO] Initialized capture source: {app_state['video_path']}")
+
+
+# =============================================================================
+# Per-space DB sync helpers
+# =============================================================================
+
+def _space_id(layout_name, index):
+    """Deterministic space ID. Index is 0-based; output uses 1-based 3-digit suffix."""
+    return f"{layout_name}-{index + 1:03d}"
+
+
+def _sync_spaces_to_db(positions, layout_name, replace=False):
+    """Push per-space geometry + zone link to the `parking_spaces` table.
+
+    replace=True: delete all rows for this layout first, then insert. Use on save
+        so deletions/reorders propagate cleanly.
+    replace=False: upsert by space_id. Use on load/reconciliation.
+    """
+    if not supabase or not positions:
+        return
+
+    records = []
+    for i, pos in enumerate(positions):
+        points = pos.get("points", [])
+        if len(points) != 4:
+            continue
+        records.append({
+            "space_id": _space_id(layout_name, i),
+            "zone_id": pos.get("zone", "Zona A"),
+            "layout_name": layout_name,
+            "points": points,
+        })
+
+    if not records:
+        return
+
+    try:
+        if replace:
+            supabase.table('parking_spaces').delete().eq('layout_name', layout_name).execute()
+            supabase.table('parking_spaces').insert(records).execute()
+        else:
+            supabase.table('parking_spaces').upsert(records, on_conflict='space_id').execute()
+        print(f"[INFO] Synced {len(records)} spaces to parking_spaces (layout='{layout_name}', replace={replace}).", flush=True)
+    except Exception as e:
+        print(f"[ERROR] Failed to sync parking_spaces: {e}", flush=True)
 
 
 # =============================================================================
@@ -267,13 +315,16 @@ def check_parking_spaces(img):
     based on confidence threshold (VPD-01 Alternative).
 
     Returns:
-        tuple: (annotated_img, available_count, occupied_count, zone_stats)
+        tuple: (annotated_img, available_count, occupied_count, zone_stats, spaces_status)
+            spaces_status is a list of {space_id, zone_id, is_occupied, confidence}
+            for the active layout, suitable for upserting to the parking_spaces table.
     """
     model = load_model_lazy()
     positions = app_state["positions"]
+    active_layout = app_state.get("active_layout", "default")
 
     if model is None or len(positions) == 0:
-        return img, 0, 0, {}
+        return img, 0, 0, {}, []
 
     input_size = app_state["model_input_size"]
     img_crops = []
@@ -300,6 +351,7 @@ def check_parking_spaces(img):
     available = 0
     occupied = 0
     zone_stats = {}
+    spaces_status = []
 
     for i, pos in enumerate(positions):
         points = pos.get("points", [])
@@ -363,6 +415,14 @@ def check_parking_spaces(img):
         zone_stats[zone]["total"] += 1
         zone_stats[zone]["available" if is_available else "occupied"] += 1
 
+        # Per-space record (Sub-Story 8: individual space mapping for mobile DB)
+        spaces_status.append({
+            "space_id": _space_id(active_layout, i),
+            "zone_id": zone,
+            "is_occupied": not is_available,
+            "confidence": round(confidence, 4),
+        })
+
     # Calculate availability confidence per zone (ratio of available spaces to total)
     for zone, stats in zone_stats.items():
         if stats["total"] > 0:
@@ -371,7 +431,7 @@ def check_parking_spaces(img):
         else:
             stats["confidence"] = 0.0
 
-    return img, available, occupied, zone_stats
+    return img, available, occupied, zone_stats, spaces_status
 
 
 def generate_frames():
@@ -407,7 +467,7 @@ def generate_frames():
             pass
 
         # Run detection
-        annotated, _, _, _ = check_parking_spaces(processed)
+        annotated, _, _, _, _ = check_parking_spaces(processed)
 
         ret, buffer = cv2.imencode('.jpg', annotated,
                                    [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -465,13 +525,14 @@ def space_count():
     if success:
         processed, _, _ = preprocess_frame(img)
         if processed is not None:
-            _, avail, occ, zone_stats = check_parking_spaces(processed)
+            _, avail, occ, zone_stats, spaces_status = check_parking_spaces(processed)
             return jsonify(
                 total=avail + occ,
                 available=avail,
                 occupied=occ,
                 timestamp=datetime.now().isoformat(),
-                zones=zone_stats
+                zones=zone_stats,
+                spaces=spaces_status
             )
 
     return jsonify(
@@ -600,6 +661,10 @@ def save_positions():
         if not saved_to_db:
             return jsonify(error=f"Error al guardar base local: {str(e)}"), 500
 
+    # Push per-space rows (replace so deletions/reorders propagate).
+    # Done before load_positions to avoid the upsert path racing the replace.
+    _sync_spaces_to_db(positions, layout_name, replace=True)
+
     # Update app state if saving to active layout
     if layout_name == app_state.get('active_layout', 'default'):
         load_positions(layout_name)
@@ -719,23 +784,47 @@ def sync_supabase_worker():
             if success:
                 processed, _, _ = preprocess_frame(img)
                 if processed is not None:
-                    _, avail, occ, zone_stats = check_parking_spaces(processed) # fetch de informacion para actualizar/insertar en la base de datos
-                    
-                    records = []
+                    _, avail, occ, zone_stats, spaces_status = check_parking_spaces(processed) # fetch de informacion para actualizar/insertar en la base de datos
+
                     current_time_iso = datetime.now().isoformat()
-                    
+
+                    # --- Zone-aggregate sync (existing): `occupancy` table ---
+                    zone_records = []
                     for zone_id, stats in zone_stats.items():
-                        records.append({
+                        zone_records.append({
                             "zone_id": zone_id,
                             "available_spaces": stats["available"],
                             "occupied_spaces": stats["occupied"],
                             "confidence": stats.get("confidence", 1.0),
                             "updated_at": current_time_iso
                         })
-                    
-                    if records:
-                        response = supabase.table('occupancy').upsert(records).execute()
-                        print(f"[{current_time_iso}] Supabase Sync: {len(records)} zones sent.")
+
+                    if zone_records:
+                        supabase.table('occupancy').upsert(zone_records).execute()
+                        print(f"[{current_time_iso}] Supabase Sync: {len(zone_records)} zones sent.")
+
+                    # --- Per-space status sync (Sub-Story 8): `parking_spaces` table ---
+                    # Must send NOT NULL columns (zone_id, layout_name, points) too:
+                    # Postgres validates NOT NULL on the INSERT path before ON CONFLICT
+                    # resolves to UPDATE, so a partial payload fails even for existing rows.
+                    positions = app_state["positions"]
+                    active_layout = app_state.get("active_layout", "default")
+                    space_records = []
+                    for i, s in enumerate(spaces_status):
+                        pos = positions[i] if i < len(positions) else {}
+                        space_records.append({
+                            "space_id": s["space_id"],
+                            "zone_id": s["zone_id"],
+                            "layout_name": active_layout,
+                            "points": pos.get("points", []),
+                            "is_occupied": s["is_occupied"],
+                            "confidence": s["confidence"],
+                            "updated_at": current_time_iso,
+                        })
+
+                    if space_records:
+                        supabase.table('parking_spaces').upsert(space_records, on_conflict='space_id').execute()
+                        print(f"[{current_time_iso}] Supabase Sync: {len(space_records)} spaces sent.")
 
         except Exception as e:
             print(f"[ERROR] Sync worker: {e}")
@@ -750,4 +839,5 @@ init_video()
 threading.Thread(target=sync_supabase_worker, daemon=True).start()
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True, use_reloader=False)
+    port = int(os.environ.get("PORT", "5000"))
+    app.run(host='0.0.0.0', port=port, debug=True, threaded=True, use_reloader=False)

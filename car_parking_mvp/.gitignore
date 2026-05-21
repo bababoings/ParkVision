@@ -27,3 +27,5 @@ install_log_utf8.txt
 
 #Metrics graphics
 metrics_output/
+
+.DS_Store
