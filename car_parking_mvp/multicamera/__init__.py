@@ -17,6 +17,7 @@ from .models import (
     SpaceObservation,
     ZoneId,
 )
+from .fusion import ObservationFusionPolicy, fuse_observations
 from .layouts import (
     default_physical_space_id,
     default_roi_id,
@@ -33,6 +34,7 @@ __all__ = [
     "CameraWorker",
     "ConsolidatedSpaceState",
     "LayoutId",
+    "ObservationFusionPolicy",
     "PhysicalSpace",
     "PhysicalSpaceId",
     "Point",
@@ -42,6 +44,7 @@ __all__ = [
     "ZoneId",
     "default_physical_space_id",
     "default_roi_id",
+    "fuse_observations",
     "normalize_points",
     "positions_to_camera_rois",
 ]
